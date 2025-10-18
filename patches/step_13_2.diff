@@ -1,0 +1,28 @@
+--- a/lib/src/features/product/presentation/product_screen.dart
++++ b/lib/src/features/product/presentation/product_screen.dart
+@@ -45,6 +45,7 @@ class _ProductScreenState extends State<ProductScreen> {
+   Future<void> _refresh() async {
+     final repo = context.read<FoodDbRepository>();
+     final f = repo.fetchByBarcode(widget.barcode);
+     setState(() => _future = f);
+     await f;
+   }
+@@ -69,12 +70,13 @@ class _ProductScreenState extends State<ProductScreen> {
+       floatingActionButton: loggedIn
+           ? FloatingActionButton.extended(
+               onPressed: () async {
+-                final ok = await showModalBottomSheet<bool>(
++                final ok = await showModalBottomSheet<bool>(
+                   context: context,
+                   showDragHandle: true,
+                   isScrollControlled: true,
+                   builder: (_) => AddPhotoSheet(barcode: widget.barcode),
+                 );
+-                if (ok == true && mounted) {
++                if (!context.mounted) return;
++                if (ok == true) {
+                   ScaffoldMessenger.of(context).showSnackBar(
+                     const SnackBar(content: Text('Photo uploaded. Pull to refresh images.')),
+                   );
+                 }
+               },

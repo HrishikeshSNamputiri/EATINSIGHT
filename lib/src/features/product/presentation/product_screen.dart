@@ -51,7 +51,8 @@ class _ProductScreenState extends State<ProductScreen> {
                   isScrollControlled: true,
                   builder: (_) => AddPhotoSheet(barcode: widget.barcode),
                 );
-                if (ok == true && mounted) {
+                if (!context.mounted) return;
+                if (ok == true) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Photo uploaded. Pull to refresh images.')),
                   );
