@@ -2,11 +2,13 @@ import 'dart:async';
 import 'off/off_api.dart';
 import 'off/off_write_api.dart';
 import 'off/off_auth.dart';
+import 'off/off_search_api.dart';
 import 'models/product.dart';
 
 /// Repository that now uses the Open Food Facts REST API (read-only in this step).
 class FoodDbRepository {
   final OffApi _api = OffApi();
+  final OffSearchApi _search = OffSearchApi();
 
   /// Fetch product by barcode from OFF (world server). Returns null if not found.
   Future<Product?> fetchByBarcode(String barcode) async {
@@ -15,6 +17,15 @@ class FoodDbRepository {
     } catch (_) {
       // Keep errors quiet for now; Step 10 will add diagnostics & retry policy.
       return null;
+    }
+  }
+
+  /// Search products (OFF v2). Page is 1-based.
+  Future<List<Product>> searchProducts(String query, {int page = 1}) async {
+    try {
+      return await _search.search(query: query, page: page, pageSize: 20);
+    } catch (_) {
+      return <Product>[];
     }
   }
 }

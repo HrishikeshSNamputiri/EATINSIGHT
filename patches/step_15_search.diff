@@ -1,0 +1,287 @@
+*** Begin Patch
+*** Add File: lib/src/data/off/off_search_api.dart
++import 'package:dio/dio.dart';
++import '../../core/env.dart';
++import '../models/product.dart';
++
++class OffSearchApi {
++  final Dio _dio;
++  OffSearchApi({Dio? dio})
++      : _dio = dio ??
++            Dio(BaseOptions(
++              baseUrl: Env.offApiBaseUrl,
++              connectTimeout: const Duration(seconds: 15),
++              receiveTimeout: const Duration(seconds: 20),
++              headers: const {
++                'Accept': 'application/json',
++                'User-Agent': 'EATINSIGHT/0.0.1 (Android)',
++              },
++            ));
++
++  /// Search products on OFF v2.
++  /// Returns a list of minimal Product models for the given page (1-based).
++  Future<List<Product>> search({
++    required String query,
++    int page = 1,
++    int pageSize = 20,
++  }) async {
++    final q = query.trim();
++    if (q.isEmpty || q.length < 2) return <Product>[];
++    final resp = await _dio.get('/api/v2/search', queryParameters: {
++      'search_terms': q,
++      'fields':
++          'code,product_name,product_name_${Env.offPreferredLocale},brands,image_front_url',
++      'page': page,
++      'page_size': pageSize,
++      'sort_by': 'unique_scans_n', // reasonable default
++    });
++    if (resp.statusCode != 200) return <Product>[];
++    final body = resp.data;
++    final prods = (body is Map && body['products'] is List)
++        ? (body['products'] as List)
++        : const <dynamic>[];
++    return prods.whereType<Map>().map((p) {
++      final String code = (p['code'] ?? '').toString();
++      final String? name = (p['product_name_${Env.offPreferredLocale}'] as String?) ??
++          (p['product_name'] as String?);
++      final String? brand = (p['brands'] as String?)
++          ?.split(',')
++          .map((s) => s.trim())
++          .where((s) => s.isNotEmpty)
++          .cast<String>()
++          .toList()
++          .firstOrNull;
++      final String? img = p['image_front_url'] as String?;
++      return Product(
++        barcode: code,
++        name: name,
++        brand: brand,
++        imageUrl: img,
++      );
++    }).toList();
++  }
++}
++
++extension<T> on Iterable<T> {
++  T? get firstOrNull => isEmpty ? null : first;
++}
+*** End Patch
+*** Begin Patch
+*** Update File: lib/src/data/fooddb_repository.dart
+@@
+-import 'off/off_api.dart';
++import 'off/off_api.dart';
+ import 'models/product.dart';
++import 'off/off_search_api.dart';
+@@
+ class FoodDbRepository {
+   final OffApi _api = OffApi();
++  final OffSearchApi _search = OffSearchApi();
+@@
+   Future<Product?> fetchByBarcode(String barcode) async {
+     try {
+       return await _api.getProduct(barcode);
+     } catch (_) {
+       return null;
+     }
+   }
++
++  /// Search products (OFF v2). Page is 1-based.
++  Future<List<Product>> searchProducts(String query, {int page = 1}) async {
++    try {
++      return await _search.search(query: query, page: page, pageSize: 20);
++    } catch (_) {
++      return <Product>[];
++    }
++  }
+ }
+*** End Patch
+*** Begin Patch
+*** Update File: lib/src/features/search/presentation/search_screen.dart
+@@
+-import 'package:flutter/material.dart';
++import 'dart:async';
++import 'package:flutter/material.dart';
++import 'package:go_router/go_router.dart';
++import 'package:provider/provider.dart';
++import '../../../data/fooddb_repository.dart';
++import '../../../routing/app_router.dart';
++import '../../../data/models/product.dart';
+ 
+-class SearchScreen extends StatelessWidget {
+-  const SearchScreen({super.key});
++class SearchScreen extends StatefulWidget {
++  const SearchScreen({super.key});
+ 
+-  @override
+-  Widget build(BuildContext context) {
+-    return const Scaffold(
+-      body: Center(child: Text('Search — coming soon')),
+-    );
+-  }
++  @override
++  State<SearchScreen> createState() => _SearchScreenState();
+ }
++
++class _SearchScreenState extends State<SearchScreen> {
++  final _q = TextEditingController();
++  final _scroll = ScrollController();
++  Timer? _debounce;
++  String _current = '';
++  bool _loading = false;
++  bool _hasMore = false;
++  int _page = 1;
++  final List<Product> _items = [];
++
++  @override
++  void initState() {
++    super.initState();
++    _scroll.addListener(_onScroll);
++  }
++
++  @override
++  void dispose() {
++    _debounce?.cancel();
++    _q.dispose();
++    _scroll.dispose();
++    super.dispose();
++  }
++
++  void _onScroll() {
++    if (!_hasMore || _loading) return;
++    if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 280) {
++      _fetchMore();
++    }
++  }
++
++  void _onChanged(String v) {
++    _debounce?.cancel();
++    _debounce = Timer(const Duration(milliseconds: 450), () {
++      _startSearch(v);
++    });
++  }
++
++  Future<void> _startSearch(String v) async {
++    final query = v.trim();
++    setState(() {
++      _current = query;
++      _items.clear();
++      _page = 1;
++      _hasMore = false;
++    });
++    if (query.length < 2) {
++      setState(() => _loading = false);
++      return;
++    }
++    await _fetchMore();
++  }
++
++  Future<void> _fetchMore() async {
++    if (_loading) return;
++    setState(() => _loading = true);
++    final repo = context.read<FoodDbRepository>();
++    final list = await repo.searchProducts(_current, page: _page);
++    if (!mounted) return;
++    setState(() {
++      _items.addAll(list);
++      _page += 1;
++      _hasMore = list.length >= 20;
++      _loading = false;
++    });
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    return Scaffold(
++      appBar: AppBar(title: const Text('Search')),
++      body: Column(
++        children: [
++          Padding(
++            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
++            child: TextField(
++              controller: _q,
++              decoration: InputDecoration(
++                labelText: 'Search products',
++                hintText: 'Type a name, brand, etc.',
++                prefixIcon: const Icon(Icons.search),
++                suffixIcon: (_current.isNotEmpty || _q.text.isNotEmpty)
++                    ? IconButton(
++                        tooltip: 'Clear',
++                        onPressed: () {
++                          _q.clear();
++                          _startSearch('');
++                        },
++                        icon: const Icon(Icons.clear),
++                      )
++                    : null,
++                border: const OutlineInputBorder(),
++              ),
++              textInputAction: TextInputAction.search,
++              onChanged: _onChanged,
++              onSubmitted: _startSearch,
++            ),
++          ),
++          Expanded(
++            child: _buildResults(context),
++          ),
++        ],
++      ),
++    );
++  }
++
++  Widget _buildResults(BuildContext context) {
++    if (_current.isEmpty) {
++      return const Center(child: Text('Type to search'));
++    }
++    if (_items.isEmpty && _loading) {
++      return const Center(child: CircularProgressIndicator());
++    }
++    if (_items.isEmpty) {
++      return const Center(child: Text('No results'));
++    }
++    return ListView.separated(
++      controller: _scroll,
++      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
++      itemBuilder: (context, i) {
++        if (i == _items.length) {
++          return Padding(
++            padding: const EdgeInsets.symmetric(vertical: 16),
++            child: _loading
++                ? const Center(child: CircularProgressIndicator())
++                : const SizedBox.shrink(),
++          );
++        }
++        final p = _items[i];
++        return ListTile(
++          leading: _Thumb(url: p.imageUrl),
++          title: Text(p.name ?? 'Unnamed product'),
++          subtitle: Text(p.brand ?? '—'),
++          onTap: () => context.go('${AppRoutes.product}'.replaceFirst(':barcode', p.barcode)),
++        );
++      },
++      separatorBuilder: (_, __) => const Divider(height: 0),
++      itemCount: _items.length + 1,
++    );
++  }
++}
++
++class _Thumb extends StatelessWidget {
++  final String? url;
++  const _Thumb({required this.url});
++  @override
++  Widget build(BuildContext context) {
++    final w = 56.0;
++    return ClipRRect(
++      borderRadius: BorderRadius.circular(8),
++      child: (url == null || url!.isEmpty)
++          ? Container(
++              width: w,
++              height: w,
++              color: Theme.of(context).colorScheme.surfaceContainerHighest,
++              child: const Icon(Icons.image_not_supported),
++            )
++          : Image.network(url!, width: w, height: w, fit: BoxFit.cover),
++    );
++  }
++}
+*** End Patch
