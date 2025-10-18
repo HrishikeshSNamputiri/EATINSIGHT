@@ -1,5 +1,8 @@
 # eatinsight
 
+[![CI](https://github.com/HrishikeshSNamputiri/EATINSIGHT/actions/workflows/flutter-ci.yml/badge.svg)](https://github.com/HrishikeshSNamputiri/EATINSIGHT/actions/workflows/flutter-ci.yml)
+
+
 A new Flutter project.
 
 ## Getting Started

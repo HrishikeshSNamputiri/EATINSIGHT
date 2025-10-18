@@ -1,0 +1,9 @@
+*** Begin Patch
+*** Update File: README.md
+@@
+-# EATINSIGHT
++# EATINSIGHT
++
++[![CI](https://github.com/HrishikeshSNamputiri/EATINSIGHT/actions/workflows/flutter-ci.yml/badge.svg)](https://github.com/HrishikeshSNamputiri/EATINSIGHT/actions/workflows/flutter-ci.yml)
++
+*** End Patch
