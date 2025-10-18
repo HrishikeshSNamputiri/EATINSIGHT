@@ -1,0 +1,88 @@
+--- a/lib/src/data/off/off_api.dart
++++ b/lib/src/data/off/off_api.dart
+@@ -24,22 +24,22 @@
+     final p = data['product'] as Map?;
+     if (p == null) return null;
+ 
+-    // Helpers
+-    String? _pickName(Map m) =>
+-        (m['product_name_${Env.offPreferredLocale}'] as String?) ??
+-        (m['product_name'] as String?);
++    // Helpers
++    String? pickName(Map m) =>
++        (m['product_name_${Env.offPreferredLocale}'] as String?) ??
++        (m['product_name'] as String?);
+ 
+-    String? _firstBrand(String? brandsCsv) =>
+-        brandsCsv?.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).firstOrNull;
++    String? firstBrand(String? brandsCsv) =>
++        brandsCsv?.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).firstOrNull;
+ 
+-    double? _num(Map m, String key) {
++    double? numValue(Map m, String key) {
+       final v = m[key];
+       if (v is num) return v.toDouble();
+       if (v is String) return double.tryParse(v);
+       return null;
+     }
+ 
+-    List<String>? _tags(Map m, String key) {
++    List<String>? tagList(Map m, String key) {
+       final v = m[key];
+       if (v is List) {
+         return v
+@@ -54,25 +54,25 @@
+ 
+     final nutr = (p['nutriments'] as Map?) ?? {};
+     return Product(
+       barcode: barcode,
+-      name: _pickName(p),
+-      brand: _firstBrand(p['brands'] as String?),
++      name: pickName(p),
++      brand: firstBrand(p['brands'] as String?),
+       imageUrl: p['image_front_url'] as String?,
+       quantity: p['quantity'] as String?,
+       ingredientsText: (p['ingredients_text_${Env.offPreferredLocale}'] as String?) ??
+           (p['ingredients_text'] as String?),
+       nutritionGrade: (p['nutrition_grades'] as String?)?.trim(), // a..e
+-      energyKcal100g: _num(nutr, 'energy-kcal_100g') ?? _num(nutr, 'energy-kcal_value'),
+-      fat100g: _num(nutr, 'fat_100g'),
+-      saturatedFat100g: _num(nutr, 'saturated-fat_100g'),
+-      carbs100g: _num(nutr, 'carbohydrates_100g'),
+-      sugars100g: _num(nutr, 'sugars_100g'),
+-      fiber100g: _num(nutr, 'fiber_100g'),
+-      proteins100g: _num(nutr, 'proteins_100g'),
+-      salt100g: _num(nutr, 'salt_100g'),
+-      sodium100g: _num(nutr, 'sodium_100g'),
+-      allergens: _tags(p, 'allergens_tags'),
+-      additives: _tags(p, 'additives_tags'),
+-      labels: _tags(p, 'labels_tags'),
++      energyKcal100g: numValue(nutr, 'energy-kcal_100g') ?? numValue(nutr, 'energy-kcal_value'),
++      fat100g: numValue(nutr, 'fat_100g'),
++      saturatedFat100g: numValue(nutr, 'saturated-fat_100g'),
++      carbs100g: numValue(nutr, 'carbohydrates_100g'),
++      sugars100g: numValue(nutr, 'sugars_100g'),
++      fiber100g: numValue(nutr, 'fiber_100g'),
++      proteins100g: numValue(nutr, 'proteins_100g'),
++      salt100g: numValue(nutr, 'salt_100g'),
++      sodium100g: numValue(nutr, 'sodium_100g'),
++      allergens: tagList(p, 'allergens_tags'),
++      additives: tagList(p, 'additives_tags'),
++      labels: tagList(p, 'labels_tags'),
+     );
+   }
+ }
+ 
+--- a/lib/src/features/product/presentation/product_screen.dart
++++ b/lib/src/features/product/presentation/product_screen.dart
+@@ -120,7 +120,7 @@ class _HeroImage extends StatelessWidget {
+     return AspectRatio(
+       aspectRatio: 1.2,
+       child: DecoratedBox(
+         decoration: BoxDecoration(
+-          color: Theme.of(context).colorScheme.surfaceVariant,
++          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+           borderRadius: BorderRadius.circular(16),
+         ),
+         child: ClipRRect(
+           borderRadius: BorderRadius.circular(16),

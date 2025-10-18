@@ -1,0 +1,47 @@
+import 'dart:async';
+import 'off/off_api.dart';
+import 'off/off_write_api.dart';
+import 'off/off_auth.dart';
+import 'models/product.dart';
+
+/// Repository that now uses the Open Food Facts REST API (read-only in this step).
+class FoodDbRepository {
+  final OffApi _api = OffApi();
+
+  /// Fetch product by barcode from OFF (world server). Returns null if not found.
+  Future<Product?> fetchByBarcode(String barcode) async {
+    try {
+      return await _api.getProduct(barcode);
+    } catch (_) {
+      // Keep errors quiet for now; Step 10 will add diagnostics & retry policy.
+      return null;
+    }
+  }
+}
+
+class ProductCreateParams {
+  final String barcode;
+  final String? name;
+  final String? brand;
+  const ProductCreateParams({required this.barcode, this.name, this.brand});
+}
+
+extension FoodDbRepositoryWrite on FoodDbRepository {
+  Future<OffWriteResult> createBasicProduct({
+    required OffAuth auth,
+    required ProductCreateParams params,
+  }) async {
+    final user = auth.offUser;
+    if (user == null) {
+      return OffWriteResult(false, 'Not logged in.');
+    }
+    final write = OffWriteApi();
+    return write.createOrUpdate(
+      user: user.userId,
+      pass: user.password,
+      barcode: params.barcode,
+      name: params.name,
+      brand: params.brand,
+    );
+  }
+}
