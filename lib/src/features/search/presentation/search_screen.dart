@@ -6,6 +6,7 @@ import '../../../data/fooddb_repository.dart';
 import '../../../data/prefs/prefs_repository.dart';
 import '../../../routing/app_router.dart';
 import '../../../data/models/product.dart';
+import '../../product/presentation/product_screen.dart';
 import 'search_result_tile.dart';
 import 'search_tokens.dart';
 
@@ -59,7 +60,24 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
-  bool _looksLikeBarcode(String s) => RegExp(r'^\\d{8,14}$').hasMatch(s);
+  bool _looksLikeBarcode(String raw) {
+    final cleaned = raw.replaceAll(RegExp(r'\\s+'), '');
+    if (cleaned.isEmpty || !RegExp(r'^\\d+$').hasMatch(cleaned)) return false;
+    final len = cleaned.length;
+    return len == 8 || len == 12 || len == 13 || len == 14;
+  }
+
+  Future<void> _handleSubmit(String raw) async {
+    final cleaned = raw.replaceAll(RegExp(r'\\s+'), '');
+    if (_looksLikeBarcode(cleaned)) {
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ProductScreen(barcode: cleaned)),
+      );
+      return;
+    }
+    _startSearch(raw);
+  }
 
   Map<String, String?> _parseTokens(String raw) {
     final parts = raw.split(RegExp(r'\\s+')).where((e) => e.isNotEmpty).toList();
@@ -97,11 +115,6 @@ class _SearchScreenState extends State<SearchScreen> {
         _loading = false;
         _tokens = const [];
       });
-      return;
-    }
-    if (_looksLikeBarcode(raw)) {
-      if (!mounted) return;
-      context.go(AppRoutes.product.replaceFirst(':barcode', raw));
       return;
     }
     final parsed = _parseTokens(raw);
@@ -200,7 +213,7 @@ class _SearchScreenState extends State<SearchScreen> {
               ),
               textInputAction: TextInputAction.search,
               onChanged: _onChanged,
-              onSubmitted: _startSearch,
+              onSubmitted: (value) => _handleSubmit(value),
             ),
           ),
           Builder(
