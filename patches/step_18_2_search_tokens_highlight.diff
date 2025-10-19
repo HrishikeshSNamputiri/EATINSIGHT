@@ -1,0 +1,240 @@
+diff --git a/lib/src/data/fooddb_repository.dart b/lib/src/data/fooddb_repository.dart
+index 15e520c..59d03e4 100644
+--- a/lib/src/data/fooddb_repository.dart
++++ b/lib/src/data/fooddb_repository.dart
+@@ -30,6 +30,7 @@ class FoodDbRepository {
+     String? countryEn,
+     String? languageCode,
+     String? countryCode,
++    List<String> tokens = const <String>[],
+   }) async {
+     try {
+       final params = OffSearchParams(
+@@ -39,18 +40,12 @@ class FoodDbRepository {
+         countryEn: countryEn,
+         languageCode: languageCode,
+         countryCode: countryCode,
++        tokens: tokens,
++        preferNameSort: true,
+         page: page,
+         pageSize: 20,
+       );
+-      final products = await _search.search(params: params);
+-      final trimmed = query.trim();
+-      if (trimmed.isEmpty) return products;
+-      final keyword = trimmed.toLowerCase();
+-      return products.where((product) {
+-        final name = (product.name ?? '').toLowerCase();
+-        final brand = (product.brand ?? '').toLowerCase();
+-        return name.contains(keyword) || brand.contains(keyword);
+-      }).toList();
++      return await _search.search(params: params);
+     } catch (_) {
+       return <Product>[];
+     }
+diff --git a/lib/src/data/off/off_search_params.dart b/lib/src/data/off/off_search_params.dart
+index 572a13d..832940e 100644
+--- a/lib/src/data/off/off_search_params.dart
++++ b/lib/src/data/off/off_search_params.dart
+@@ -7,6 +7,10 @@ class OffSearchParams {
+   final String? countryEn;
+   /// Comma-separated list of fields requested from the API.
+   final String fields;
++  /// If true, explicitly sort by product_name when querying (Smooth parity).
++  final bool preferNameSort;
++  /// Normalized tokens (client fallback) - computed in the UI, not sent to OFF.
++  final List<String> tokens;
+   final String? languageCode; // ISO 639-1, e.g. "en"
+   final String? countryCode; // ISO 3166-1 alpha-2, e.g. "in"
+   final int page;
+@@ -18,6 +22,8 @@ class OffSearchParams {
+     this.brandEn,
+     this.countryEn,
+     this.fields = 'code,product_name,brands,quantity,image_small_url',
++    this.preferNameSort = true,
++    this.tokens = const <String>[],
+     this.languageCode,
+     this.countryCode,
+     this.page = 1,
+@@ -31,7 +37,9 @@ class OffSearchParams {
+       'search_simple': 1,
+       'nocache': 1,
+       // Sort by product name when user typed keywords, else stick with recency.
+-      'sort_by': (query != null && query!.trim().isNotEmpty) ? 'product_name' : 'last_modified_t',
++      'sort_by': (preferNameSort && query != null && query!.trim().isNotEmpty)
++          ? 'product_name'
++          : 'last_modified_t',
+       // Paging
+       'page': page,
+       'page_size': pageSize,
+diff --git a/lib/src/features/search/presentation/search_screen.dart b/lib/src/features/search/presentation/search_screen.dart
+index 5b03c43..3f939f6 100644
+--- a/lib/src/features/search/presentation/search_screen.dart
++++ b/lib/src/features/search/presentation/search_screen.dart
+@@ -6,6 +6,8 @@ import '../../../data/fooddb_repository.dart';
+ import '../../../data/prefs/prefs_repository.dart';
+ import '../../../routing/app_router.dart';
+ import '../../../data/models/product.dart';
++import 'search_result_tile.dart';
++import 'search_tokens.dart';
+ 
+ class SearchScreen extends StatefulWidget {
+   const SearchScreen({super.key});
+@@ -27,6 +29,7 @@ class _SearchScreenState extends State<SearchScreen> {
+   int _page = 1;
+   final int _pageSize = 20;
+   final List<Product> _items = [];
++  List<String> _tokens = const [];
+ 
+   @override
+   void initState() {
+@@ -92,6 +95,7 @@ class _SearchScreenState extends State<SearchScreen> {
+         _page = 1;
+         _hasMore = false;
+         _loading = false;
++        _tokens = const [];
+       });
+       return;
+     }
+@@ -127,6 +131,7 @@ class _SearchScreenState extends State<SearchScreen> {
+       _page = 1;
+       _hasMore = false;
+       _loading = true;
++      _tokens = tokenize(query);
+     });
+     await _fetchMore(reset: true);
+   }
+@@ -146,12 +151,23 @@ class _SearchScreenState extends State<SearchScreen> {
+       countryEn: _country,
+       languageCode: prefs.language,
+       countryCode: prefs.country,
++      tokens: _tokens,
+     );
+     if (!mounted) return;
++    final tokens = _tokens;
++    final filtered = tokens.isEmpty
++        ? list
++        : list
++            .where((p) => containsAllTokens(
++                  haystackName: p.name ?? '',
++                  haystackBrand: p.brand ?? '',
++                  tokens: tokens,
++                ))
++            .toList();
+     setState(() {
+-      _items.addAll(list);
++      _items.addAll(filtered);
+       _page += 1;
+-      _hasMore = _current.isEmpty && list.length >= _pageSize;
++      _hasMore = tokens.isEmpty && list.length >= _pageSize;
+       _loading = false;
+     });
+   }
+@@ -197,8 +213,8 @@ class _SearchScreenState extends State<SearchScreen> {
+               if (prefs.language != null && prefs.language!.trim().isNotEmpty) {
+                 segments.add('lc=${prefs.language!.trim()}');
+               }
+-              final keyword = _current.trim();
+-              if (segments.isEmpty && keyword.isEmpty) return const SizedBox.shrink();
++              final tokens = _tokens;
++              if (segments.isEmpty && tokens.isEmpty) return const SizedBox.shrink();
+               return Padding(
+                 padding: const EdgeInsets.symmetric(horizontal: 16),
+                 child: Align(
+@@ -211,9 +227,9 @@ class _SearchScreenState extends State<SearchScreen> {
+                           'Applied preferences: ${segments.join(', ')}',
+                           style: Theme.of(context).textTheme.bodySmall,
+                         ),
+-                      if (keyword.isNotEmpty)
++                      if (tokens.isNotEmpty)
+                         Text(
+-                          'Keyword: "$keyword"',
++                          'Keywords: ${tokens.join(' · ')}',
+                           style: Theme.of(context).textTheme.bodySmall,
+                         ),
+                     ],
+@@ -223,14 +239,14 @@ class _SearchScreenState extends State<SearchScreen> {
+             },
+           ),
+           Expanded(
+-            child: _buildResults(context),
++            child: _buildResults(context, _tokens),
+           ),
+         ],
+       ),
+     );
+   }
+ 
+-  Widget _buildResults(BuildContext context) {
++  Widget _buildResults(BuildContext context, List<String> tokens) {
+     final hasQuery =
+         _current.isNotEmpty || (_category != null) || (_brand != null) || (_country != null);
+     if (!hasQuery) {
+@@ -242,11 +258,12 @@ class _SearchScreenState extends State<SearchScreen> {
+     if (_items.isEmpty) {
+       return const Center(child: Text('No results'));
+     }
+-    return ListView.separated(
++    return ListView.builder(
+       controller: _scroll,
+-      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+-      itemBuilder: (context, i) {
+-        if (i == _items.length) {
++      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
++      itemCount: _items.length + (_hasMore ? 1 : 0),
++      itemBuilder: (context, index) {
++        if (index >= _items.length) {
+           return Padding(
+             padding: const EdgeInsets.symmetric(vertical: 16),
+             child: _loading
+@@ -254,38 +271,20 @@ class _SearchScreenState extends State<SearchScreen> {
+                 : const SizedBox.shrink(),
+           );
+         }
+-        final p = _items[i];
+-        return ListTile(
+-          leading: _Thumb(url: p.imageUrl),
+-          title: Text(p.name ?? 'Unnamed product'),
+-          subtitle: Text(p.brand ?? '—'),
+-          onTap: () => context.go(
+-            AppRoutes.product.replaceFirst(':barcode', p.barcode),
+-          ),
++        final product = _items[index];
++        return Column(
++          children: [
++            SearchResultTile(
++              product: product,
++              tokens: tokens,
++              onTap: () => context.go(
++                AppRoutes.product.replaceFirst(':barcode', product.barcode),
++              ),
++            ),
++            const Divider(height: 0),
++          ],
+         );
+       },
+-      separatorBuilder: (_, __) => const Divider(height: 0),
+-      itemCount: _items.length + 1,
+-    );
+-  }
+-}
+-
+-class _Thumb extends StatelessWidget {
+-  final String? url;
+-  const _Thumb({required this.url});
+-  @override
+-  Widget build(BuildContext context) {
+-    const w = 56.0;
+-    return ClipRRect(
+-      borderRadius: BorderRadius.circular(8),
+-      child: (url == null || url!.isEmpty)
+-          ? Container(
+-              width: w,
+-              height: w,
+-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+-              child: const Icon(Icons.image_not_supported),
+-            )
+-          : Image.network(url!, width: w, height: w, fit: BoxFit.cover),
+     );
+   }
+ }

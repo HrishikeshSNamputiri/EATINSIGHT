@@ -30,6 +30,7 @@ class FoodDbRepository {
     String? countryEn,
     String? languageCode,
     String? countryCode,
+    List<String> tokens = const <String>[],
   }) async {
     try {
       final params = OffSearchParams(
@@ -39,18 +40,12 @@ class FoodDbRepository {
         countryEn: countryEn,
         languageCode: languageCode,
         countryCode: countryCode,
+        tokens: tokens,
+        preferNameSort: true,
         page: page,
         pageSize: 20,
       );
-      final products = await _search.search(params: params);
-      final trimmed = query.trim();
-      if (trimmed.isEmpty) return products;
-      final keyword = trimmed.toLowerCase();
-      return products.where((product) {
-        final name = (product.name ?? '').toLowerCase();
-        final brand = (product.brand ?? '').toLowerCase();
-        return name.contains(keyword) || brand.contains(keyword);
-      }).toList();
+      return await _search.search(params: params);
     } catch (_) {
       return <Product>[];
     }
