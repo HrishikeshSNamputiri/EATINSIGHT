@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../../data/off/off_auth.dart';
+import '../../../routing/app_router.dart';
 import 'login_screen.dart';
 import 'signup_screen.dart';
 
@@ -47,6 +49,11 @@ class ProfileScreen extends StatelessWidget {
                     icon: const Icon(Icons.logout),
                     label: const Text('Sign out'),
                   ),
+                OutlinedButton.icon(
+                  onPressed: () => context.go(AppRoutes.prefs),
+                  icon: const Icon(Icons.tune),
+                  label: const Text('Preferences'),
+                ),
               ],
             ),
             const SizedBox(height: 24),

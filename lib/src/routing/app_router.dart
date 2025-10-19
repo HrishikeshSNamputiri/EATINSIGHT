@@ -5,11 +5,13 @@ import '../features/search/presentation/search_screen.dart';
 import '../features/prices/presentation/prices_screen.dart';
 import '../features/lists/presentation/lists_screen.dart';
 import '../features/profile/presentation/profile_screen.dart';
+import '../features/profile/presentation/preferences_screen.dart';
 import '../features/product/presentation/product_screen.dart';
 import 'scaffold_with_nav.dart';
 
 class AppRoutes {
   static const home = '/';
+  static const prefs = '/prefs';
   static const scan = '/scan';
   static const search = '/search';
   static const prices = '/prices';
@@ -30,6 +32,7 @@ GoRouter createRouter() {
           GoRoute(path: AppRoutes.search, builder: (_, __) => const SearchScreen()),
           GoRoute(path: AppRoutes.prices, builder: (_, __) => const PricesScreen()),
           GoRoute(path: AppRoutes.lists, builder: (_, __) => const ListsScreen()),
+          GoRoute(path: AppRoutes.prefs, builder: (_, __) => const PreferencesScreen()),
           GoRoute(path: AppRoutes.profile, builder: (_, __) => const ProfileScreen()),
           GoRoute(
             path: AppRoutes.product,

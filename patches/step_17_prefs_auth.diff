@@ -1,0 +1,345 @@
+--- /dev/null
++++ b/lib/src/data/prefs/user_prefs.dart
+@@ -0,0 +1,78 @@
++import 'dart:convert';
++
++class UserPrefs {
++  final String? country;     // e.g., "in", "fr"
++  final String? language;    // e.g., "en"
++  final String? currency;    // e.g., "INR"
++  final bool haptics;
++  final bool scannerVibration;
++  final bool keepScreenOn;
++
++  const UserPrefs({
++    this.country,
++    this.language,
++    this.currency,
++    this.haptics = true,
++    this.scannerVibration = true,
++    this.keepScreenOn = false,
++  });
++
++  static const defaults = UserPrefs();
++
++  UserPrefs copyWith({
++    String? country,
++    String? language,
++    String? currency,
++    bool? haptics,
++    bool? scannerVibration,
++    bool? keepScreenOn,
++  }) {
++    return UserPrefs(
++      country: country ?? this.country,
++      language: language ?? this.language,
++      currency: currency ?? this.currency,
++      haptics: haptics ?? this.haptics,
++      scannerVibration: scannerVibration ?? this.scannerVibration,
++      keepScreenOn: keepScreenOn ?? this.keepScreenOn,
++    );
++  }
++
++  Map<String, dynamic> toJson() => {
++    'country': country,
++    'language': language,
++    'currency': currency,
++    'haptics': haptics,
++    'scannerVibration': scannerVibration,
++    'keepScreenOn': keepScreenOn,
++  };
++
++  factory UserPrefs.fromJson(Map<String, dynamic> json) => UserPrefs(
++    country: json['country'] as String?,
++    language: json['language'] as String?,
++    currency: json['currency'] as String?,
++    haptics: (json['haptics'] as bool?) ?? true,
++    scannerVibration: (json['scannerVibration'] as bool?) ?? true,
++    keepScreenOn: (json['keepScreenOn'] as bool?) ?? false,
++  );
++
++  @override
++  String toString() => jsonEncode(toJson());
++}
+--- /dev/null
++++ b/lib/src/data/prefs/prefs_repository.dart
+@@ -0,0 +1,131 @@
++import 'dart:convert';
++import 'dart:io';
++import 'package:flutter/foundation.dart';
++// ignore: depend_on_referenced_packages
++import 'package:path/path.dart' as p;
++import 'package:path_provider/path_provider.dart';
++import 'user_prefs.dart';
++
++class PrefsRepository {
++  Future<File> _file() async {
++    final dir = await getApplicationDocumentsDirectory();
++    return File(p.join(dir.path, 'prefs.json'));
++  }
++
++  Future<UserPrefs> load() async {
++    try {
++      final f = await _file();
++      if (!await f.exists()) return UserPrefs.defaults;
++      final txt = await f.readAsString();
++      final map = jsonDecode(txt);
++      if (map is Map<String, dynamic>) return UserPrefs.fromJson(map);
++      return UserPrefs.defaults;
++    } catch (_) {
++      return UserPrefs.defaults;
++    }
++  }
++
++  Future<void> save(UserPrefs prefs) async {
++    final f = await _file();
++    await f.writeAsString(jsonEncode(prefs.toJson()));
++  }
++}
++
++class PrefsController extends ChangeNotifier {
++  final PrefsRepository _repo;
++  UserPrefs _prefs = UserPrefs.defaults;
++  bool _loading = false;
++  String? _error;
++
++  PrefsController(this._repo);
++
++  UserPrefs get prefs => _prefs;
++  bool get loading => _loading;
++  String? get error => _error;
++
++  Future<void> load() async {
++    _loading = true;
++    _error = null;
++    notifyListeners();
++    try {
++      _prefs = await _repo.load();
++    } catch (e) {
++      _error = e.toString();
++    } finally {
++      _loading = false;
++      notifyListeners();
++    }
++  }
++
++  Future<void> update(UserPrefs next) async {
++    _prefs = next;
++    notifyListeners();
++    await _repo.save(next);
++  }
++}
+--- /dev/null
++++ b/lib/src/features/profile/presentation/preferences_screen.dart
+@@ -0,0 +1,168 @@
++import 'package:flutter/material.dart';
++import 'package:provider/provider.dart';
++import '../../../data/prefs/prefs_repository.dart';
++import '../../../data/prefs/user_prefs.dart';
++
++class PreferencesScreen extends StatefulWidget {
++  const PreferencesScreen({super.key});
++
++  @override
++  State<PreferencesScreen> createState() => _PreferencesScreenState();
++}
++
++class _PreferencesScreenState extends State<PreferencesScreen> {
++  late PrefsController _ctrl;
++  late TextEditingController _countryCtrl;
++  late TextEditingController _langCtrl;
++  late TextEditingController _currencyCtrl;
++  bool _haptics = true;
++  bool _scannerVibration = true;
++  bool _keepScreenOn = false;
++
++  @override
++  void initState() {
++    super.initState();
++    _ctrl = context.read<PrefsController>();
++    _countryCtrl = TextEditingController();
++    _langCtrl = TextEditingController();
++    _currencyCtrl = TextEditingController();
++    _ctrl.addListener(_onChange);
++    _ctrl.load();
++  }
++
++  void _onChange() {
++    final p = _ctrl.prefs;
++    _countryCtrl.text = p.country ?? '';
++    _langCtrl.text = p.language ?? '';
++    _currencyCtrl.text = p.currency ?? '';
++    _haptics = p.haptics;
++    _scannerVibration = p.scannerVibration;
++    _keepScreenOn = p.keepScreenOn;
++    if (mounted) setState(() {});
++  }
++
++  @override
++  void dispose() {
++    _ctrl.removeListener(_onChange);
++    _countryCtrl.dispose();
++    _langCtrl.dispose();
++    _currencyCtrl.dispose();
++    super.dispose();
++  }
++
++  Future<void> _save() async {
++    final next = _ctrl.prefs.copyWith(
++      country: _countryCtrl.text.trim().isEmpty ? null : _countryCtrl.text.trim(),
++      language: _langCtrl.text.trim().isEmpty ? null : _langCtrl.text.trim(),
++      currency: _currencyCtrl.text.trim().isEmpty ? null : _currencyCtrl.text.trim(),
++      haptics: _haptics,
++      scannerVibration: _scannerVibration,
++      keepScreenOn: _keepScreenOn,
++    );
++    await _ctrl.update(next);
++    if (!mounted) return;
++    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preferences saved.')));
++    Navigator.of(context).maybePop();
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final loading = context.watch<PrefsController>().loading;
++    return Scaffold(
++      appBar: AppBar(title: const Text('Preferences')),
++      body: ListView(
++        padding: const EdgeInsets.all(16),
++        children: [
++          if (loading) const LinearProgressIndicator(),
++          const Text('General', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
++          const SizedBox(height: 8),
++          TextField(
++            controller: _countryCtrl,
++            decoration: const InputDecoration(
++              labelText: 'Country code (e.g., in, fr)',
++              helperText: 'Optional default for search & product fetch',
++            ),
++          ),
++          const SizedBox(height: 12),
++          TextField(
++            controller: _langCtrl,
++            decoration: const InputDecoration(
++              labelText: 'Language code (e.g., en)',
++              helperText: 'Optional preference for texts',
++            ),
++          ),
++          const SizedBox(height: 12),
++          TextField(
++            controller: _currencyCtrl,
++            decoration: const InputDecoration(
++              labelText: 'Currency (e.g., INR, EUR)',
++              helperText: 'Optional currency for prices',
++            ),
++          ),
++          const SizedBox(height: 20),
++          const Text('Interaction', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
++          SwitchListTile(
++            value: _haptics,
++            onChanged: (v) => setState(() => _haptics = v),
++            title: const Text('Haptics'),
++            subtitle: const Text('Vibration and gentle feedback where supported'),
++          ),
++          SwitchListTile(
++            value: _scannerVibration,
++            onChanged: (v) => setState(() => _scannerVibration = v),
++            title: const Text('Scanner vibration'),
++            subtitle: const Text('Vibrate when a barcode is detected'),
++          ),
++          SwitchListTile(
++            value: _keepScreenOn,
++            onChanged: (v) => setState(() => _keepScreenOn = v),
++            title: const Text('Keep screen on while scanning'),
++          ),
++          const SizedBox(height: 12),
++          FilledButton(
++            onPressed: loading ? null : _save,
++            child: Text(loading ? 'Saving…' : 'Save'),
++          ),
++        ],
++      ),
++    );
++  }
++}
+--- a/lib/src/routing/app_router.dart
++++ b/lib/src/routing/app_router.dart
+@@ -10,10 +10,12 @@ import '../features/search/presentation/search_screen.dart';
+ import '../features/prices/presentation/prices_screen.dart';
+ import '../features/lists/presentation/lists_screen.dart';
+ import '../features/profile/presentation/profile_screen.dart';
++import '../features/profile/presentation/preferences_screen.dart';
+ import 'scaffold_with_nav.dart';
+ 
+ class AppRoutes {
+   static const home = '/';
++  static const prefs = '/prefs';
+   static const scan = '/scan';
+   static const search = '/search';
+   static const prices = '/prices';
+@@ -30,6 +32,7 @@ GoRouter createRouter() {
+           GoRoute(path: AppRoutes.search, builder: (_, __) => const SearchScreen()),
+           GoRoute(path: AppRoutes.prices, builder: (_, __) => const PricesScreen()),
+           GoRoute(path: AppRoutes.lists, builder: (_, __) => const ListsScreen()),
++          GoRoute(path: AppRoutes.prefs, builder: (_, __) => const PreferencesScreen()),
+           GoRoute(path: AppRoutes.profile, builder: (_, __) => const ProfileScreen()),
+         ],
+       ),
+--- a/lib/src/features/profile/presentation/profile_screen.dart
++++ b/lib/src/features/profile/presentation/profile_screen.dart
+@@ -1,10 +1,12 @@
+ import 'package:flutter/material.dart';
+ import 'package:provider/provider.dart';
+ import '../../../data/off/off_auth.dart';
++import 'package:go_router/go_router.dart';
++import '../../../routing/app_router.dart';
+ import 'login_screen.dart';
+ import 'signup_screen.dart';
+ 
+ class ProfileScreen extends StatelessWidget {
+   const ProfileScreen({super.key});
+@@ -30,6 +32,10 @@ class ProfileScreen extends StatelessWidget {
+                 if (logged)
+                   OutlinedButton.icon(
+                     onPressed: auth.clear,
+                     icon: const Icon(Icons.logout),
+                     label: const Text('Sign out'),
+                   ),
++                OutlinedButton.icon(
++                  onPressed: () => context.go(AppRoutes.prefs),
++                  icon: const Icon(Icons.tune),
++                  label: const Text('Preferences'),
++                ),
+               ],
+             ),
+             const SizedBox(height: 24),
+             const Text('Credentials are stored securely on this device.'),
+@@ -42,6 +48,7 @@ class ProfileScreen extends StatelessWidget {
+       ),
+     );
+   }
+ }
+--- a/lib/main.dart
++++ b/lib/main.dart
+@@ -1,10 +1,18 @@
+ import 'package:flutter/material.dart';
+ import 'src/theme/app_theme.dart';
+ import 'src/routing/app_router.dart';
++import 'package:provider/provider.dart';
++import 'src/data/prefs/prefs_repository.dart';
+ 
+ void main() {
+   WidgetsFlutterBinding.ensureInitialized();
+-  runApp(const EatInsightApp());
++  runApp(
++    MultiProvider(
++      providers: [
++        ChangeNotifierProvider(create: (_) => PrefsController(PrefsRepository())..load()),
++      ],
++      child: const EatInsightApp(),
++    ),
++  );
+ }
+ 
+ class EatInsightApp extends StatelessWidget {
+   const EatInsightApp({super.key});
