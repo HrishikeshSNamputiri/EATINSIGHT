@@ -8,6 +8,7 @@ import '../../../routing/app_router.dart';
 import '../../../data/off/off_auth.dart';
 import 'add_photo_sheet.dart';
 import 'edit_product_sheet.dart';
+import 'robotoff_questions_sheet.dart';
 
 class ProductScreen extends StatefulWidget {
   final String barcode;
@@ -132,6 +133,17 @@ class _ProductScreenState extends State<ProductScreen> {
                       additives: product.additives ?? const [],
                     ),
                   ],
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: () => showModalBottomSheet<void>(
+                    context: context,
+                    showDragHandle: true,
+                    isScrollControlled: true,
+                    builder: (_) => RobotoffQuestionsSheet(barcode: product.barcode),
+                  ),
+                  icon: const Icon(Icons.question_mark),
+                  label: const Text('Questions'),
+                ),
                 const SizedBox(height: 24),
                 Row(
                   children: [

@@ -3,6 +3,7 @@ import 'off/off_api.dart';
 import 'off/off_write_api.dart';
 import 'off/off_auth.dart';
 import 'off/off_search_api.dart';
+import 'off/off_search_params.dart';
 import 'models/product.dart';
 
 /// Repository that now uses the Open Food Facts REST API (read-only in this step).
@@ -27,16 +28,21 @@ class FoodDbRepository {
     String? categoryEn,
     String? brandEn,
     String? countryEn,
+    String? languageCode,
+    String? countryCode,
   }) async {
     try {
-      return await _search.search(
+      final params = OffSearchParams(
         query: query,
-        page: page,
-        pageSize: 20,
         categoryEn: categoryEn,
         brandEn: brandEn,
         countryEn: countryEn,
+        languageCode: languageCode,
+        countryCode: countryCode,
+        page: page,
+        pageSize: 20,
       );
+      return await _search.search(params: params);
     } catch (_) {
       return <Product>[];
     }

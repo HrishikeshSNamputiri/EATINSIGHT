@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../../../data/fooddb_repository.dart';
+import '../../../data/prefs/prefs_repository.dart';
 import '../../../routing/app_router.dart';
 import '../../../data/models/product.dart';
 
@@ -136,12 +137,15 @@ class _SearchScreenState extends State<SearchScreen> {
       setState(() => _loading = true);
     }
     final repo = context.read<FoodDbRepository>();
+    final prefs = context.read<PrefsController>().prefs;
     final list = await repo.searchProducts(
       _current,
       page: _page,
       categoryEn: _category,
       brandEn: _brand,
       countryEn: _country,
+      languageCode: prefs.language,
+      countryCode: prefs.country,
     );
     if (!mounted) return;
     setState(() {
@@ -182,6 +186,29 @@ class _SearchScreenState extends State<SearchScreen> {
               onChanged: _onChanged,
               onSubmitted: _startSearch,
             ),
+          ),
+          Builder(
+            builder: (context) {
+              final prefs = context.watch<PrefsController>().prefs;
+              final segments = <String>[];
+              if (prefs.country != null && prefs.country!.trim().isNotEmpty) {
+                segments.add('country=${prefs.country!.trim()}');
+              }
+              if (prefs.language != null && prefs.language!.trim().isNotEmpty) {
+                segments.add('lc=${prefs.language!.trim()}');
+              }
+              if (segments.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Applied preferences: ${segments.join(', ')}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              );
+            },
           ),
           Expanded(
             child: _buildResults(context),

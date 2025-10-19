@@ -1,0 +1,244 @@
+--- a/lib/src/data/robotoff/robotoff_api.dart
++++ b/lib/src/data/robotoff/robotoff_api.dart
+@@ -1,10 +1,11 @@
+ import 'dart:convert';
+ import 'package:dio/dio.dart';
+ import '../../core/env.dart';
+ 
+ class RoboQuestion {
+   final String id;
+   final String question;
+   final String? sourceImageUrl;
+   RoboQuestion({required this.id, required this.question, this.sourceImageUrl});
+ }
+@@
+   /// Fetch top questions for a barcode.
+-  Future<List<RoboQuestion>> fetchQuestions(String barcode, {String lang = 'en', int count = 5}) async {
++  Future<List<RoboQuestion>> fetchQuestions(String barcode, {String lang = 'en', int count = 5}) async {
+     final res = await _dioRobo.get(
+       '/api/v1/questions',
+       queryParameters: {'barcode': barcode, 'lang': lang, 'count': count},
+     );
+     final data = res.data is Map ? res.data['questions'] : null;
+     if (data is List) {
+       return data.map((q) {
+         final id = q['insight_id']?.toString() ?? q['id']?.toString() ?? '';
+         final text = (q['question'] ?? q['value'] ?? q['text'] ?? '').toString();
+         final img = (q['source_image_url'] ?? q['image_url'] ?? q['imageUrl'])?.toString();
+         return RoboQuestion(id: id, question: text, sourceImageUrl: img);
+       }).where((e) => e.id.isNotEmpty && e.question.isNotEmpty).toList();
+     }
+     return <RoboQuestion>[];
+   }
+--- a/lib/src/features/product/presentation/robotoff_questions_sheet.dart
++++ b/lib/src/features/product/presentation/robotoff_questions_sheet.dart
+@@ -1,10 +1,12 @@
+ import 'package:flutter/material.dart';
+ import 'package:provider/provider.dart';
+ import '../../../data/robotoff/robotoff_api.dart';
+ import '../../../data/off/off_auth.dart';
+ import '../../../data/models/product.dart';
++import '../../../data/prefs/prefs_repository.dart';
+ 
+ class RobotoffQuestionsSheet extends StatefulWidget {
+   final Product product;
+   const RobotoffQuestionsSheet({super.key, required this.product});
+   @override
+   State<RobotoffQuestionsSheet> createState() => _RobotoffQuestionsSheetState();
+ }
+@@
+   Future<void> _load() async {
+     setState(() { _loading = true; _error = null; });
+     try {
+-      final qs = await _api.fetchQuestions(widget.product.barcode);
++      final prefs = context.read<PrefsController>().prefs;
++      final lang = (prefs.language ?? 'en').trim().isEmpty ? 'en' : prefs.language!;
++      final qs = await _api.fetchQuestions(widget.product.barcode, lang: lang);
+       if (!mounted) return;
+       setState(() => _questions = qs);
+     } catch (e) {
+       setState(() => _error = e.toString());
+     } finally {
+       if (mounted) setState(() => _loading = false);
+     }
+   }
+--- /dev/null
++++ b/lib/src/data/off/off_search_params.dart
+@@ -0,0 +1,49 @@
++import '../prefs/lookup_tables.dart';
++
++class OffSearchParams {
++  final String? query;
++  final String? languageCode; // ISO 639-1, e.g., 'en'
++  final String? countryCode;  // ISO 3166-1 alpha-2, e.g., 'in'
++  final int page;
++  final int pageSize;
++
++  const OffSearchParams({
++    this.query,
++    this.languageCode,
++    this.countryCode,
++    this.page = 1,
++    this.pageSize = 20,
++  });
++
++  /// OFF v2 search wants the *English* country name for countries_tags_en.
++  Map<String, dynamic> toQueryMap() {
++    final map = <String, dynamic>{
++      'search_simple': 1,
++      'json': 1,
++      'sort_by': 'last_modified_t',
++      'page': page,
++      'page_size': pageSize,
++    };
++    if (query != null && query!.trim().isNotEmpty) {
++      map['search_terms'] = query!.trim();
++    }
++    if (languageCode != null && languageCode!.trim().isNotEmpty) {
++      map['lc'] = languageCode;
++    }
++    if (countryCode != null && countryCode!.trim().isNotEmpty) {
++      final cc = countryCode!.toLowerCase();
++      final match = kCountries.firstWhere(
++        (e) => e.code.toLowerCase() == cc,
++        orElse: () => CodeName(cc, cc),
++      );
++      map['countries_tags_en'] = match.name; // e.g. "India"
++    }
++    return map;
++  }
++}
+--- a/lib/src/data/off/off_search_api.dart
++++ b/lib/src/data/off/off_search_api.dart
+@@ -1,9 +1,13 @@
+ import 'package:dio/dio.dart';
+ import '../../core/env.dart';
+ import '../models/product.dart';
++import 'off_search_params.dart';
+ 
+ class OffSearchApi {
+   final Dio _dio = Dio(BaseOptions(baseUrl: Env.offBaseUrl));
++  String? languageCode;
++  String? countryCode;
++
+   OffSearchApi();
+ 
+   Future<({List<Product> items, bool hasMore})> search({
+-    required String query,
+-    int page = 1,
+-    int pageSize = 20,
++    required OffSearchParams params,
+   }) async {
+-    final qp = {
+-      'search_simple': 1,
+-      'json': 1,
+-      'sort_by': 'last_modified_t',
+-      'page': page,
+-      'page_size': pageSize,
+-      if (query.trim().isNotEmpty) 'search_terms': query.trim(),
+-    };
+-    final res = await _dio.get('/api/v2/search', queryParameters: qp);
++    final res = await _dio.get('/api/v2/search', queryParameters: params.toQueryMap());
+     if (res.statusCode != 200) {
+       return (items: const <Product>[], hasMore: false);
+     }
+     final data = res.data;
+     final products = <Product>[];
+     final list = (data is Map) ? (data['products'] as List?) : null;
+     if (list != null) {
+       for (final it in list) {
+         products.add(Product.fromJson(it));
+       }
+     }
+-    final count = (data is Map) ? (data['count'] as num?)?.toInt() ?? 0 : 0;
+-    final hasMore = page * pageSize < count;
++    final count = (data is Map) ? (data['count'] as num?)?.toInt() ?? 0 : 0;
++    final pageSize = params.pageSize;
++    final page = params.page;
++    final hasMore = page * pageSize < count;
+     return (items: products, hasMore: hasMore);
+   }
+ }
+--- a/lib/src/features/search/presentation/search_screen.dart
++++ b/lib/src/features/search/presentation/search_screen.dart
+@@ -1,10 +1,13 @@
+ import 'package:flutter/material.dart';
+ import 'package:provider/provider.dart';
+ import '../../../data/off/off_search_api.dart';
++import '../../../data/off/off_search_params.dart';
+ import '../../../data/models/product.dart';
++import '../../../data/prefs/prefs_repository.dart';
+ 
+ class SearchScreen extends StatefulWidget {
+   const SearchScreen({super.key});
+   @override
+   State<SearchScreen> createState() => _SearchScreenState();
+ }
+@@
+   Future<void> _run() async {
+     setState(() { _loading = true; _error = null; });
+     try {
+-      final res = await _api.search(query: _q.text, page: _page, pageSize: _pageSize);
++      final prefs = context.read<PrefsController>().prefs;
++      final params = OffSearchParams(
++        query: _q.text,
++        languageCode: prefs.language,
++        countryCode: prefs.country,
++        page: _page,
++        pageSize: _pageSize,
++      );
++      final res = await _api.search(params: params);
+       if (!mounted) return;
+       setState(() {
+         if (_page == 1) _items.clear();
+         _items.addAll(res.items);
+         _hasMore = res.hasMore;
+       });
+     } catch (e) {
+       setState(() => _error = e.toString());
+@@
+   Widget build(BuildContext context) {
+     return Scaffold(
+       appBar: AppBar(title: const Text('Search')),
+       body: Column(
+         children: [
+           Padding(
+             padding: const EdgeInsets.all(12),
+             child: TextField(
+               controller: _q,
+               decoration: const InputDecoration(
+                 prefixIcon: Icon(Icons.search),
+                 hintText: 'Search products…',
+               ),
+               onChanged: _onQueryChanged,
+             ),
+           ),
++          // Tiny caption to confirm applied prefs on-device (debug-only)
++          Builder(builder: (context) {
++            final prefs = context.watch<PrefsController>().prefs;
++            final pCountry = prefs.country;
++            final pLang = prefs.language;
++            if ((pCountry == null || pCountry.isEmpty) && (pLang == null || pLang.isEmpty)) {
++              return const SizedBox.shrink();
++            }
++            return Padding(
++              padding: const EdgeInsets.symmetric(horizontal: 12),
++              child: Align(
++                alignment: Alignment.centerLeft,
++                child: Text(
++                  'Filters:'
++                  '${pCountry != null && pCountry.isNotEmpty ? ' country=$pCountry' : ''}'
++                  '${pLang != null && pLang.isNotEmpty ? ' lc=$pLang' : ''}',
++                  style: Theme.of(context).textTheme.bodySmall,
++                ),
++              ),
++            );
++          }),
+           const SizedBox(height: 8),
+           Expanded(
+             child: _buildList(),
+           ),
+         ],
+       ),
+     );
+   }
