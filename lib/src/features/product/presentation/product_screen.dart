@@ -7,6 +7,7 @@ import '../../../data/models/product.dart';
 import '../../../routing/app_router.dart';
 import '../../../data/off/off_auth.dart';
 import 'add_photo_sheet.dart';
+import 'edit_product_sheet.dart';
 
 class ProductScreen extends StatefulWidget {
   final String barcode;
@@ -18,17 +19,32 @@ class ProductScreen extends StatefulWidget {
 
 class _ProductScreenState extends State<ProductScreen> {
   late Future<Product?> _future;
+  Product? _latestProduct;
 
   @override
   void initState() {
     super.initState();
     _future = context.read<FoodDbRepository>().fetchByBarcode(widget.barcode);
+    _future.then((value) {
+      if (mounted) {
+        setState(() {
+          _latestProduct = value;
+        });
+      }
+    });
   }
 
   Future<void> _refresh() async {
     final repo = context.read<FoodDbRepository>();
     final f = repo.fetchByBarcode(widget.barcode);
     setState(() => _future = f);
+    f.then((value) {
+      if (mounted) {
+        setState(() {
+          _latestProduct = value;
+        });
+      }
+    });
     await f;
   }
 
@@ -40,20 +56,44 @@ class _ProductScreenState extends State<ProductScreen> {
         title: const Text('Product'),
         actions: [
           IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
+          if (loggedIn)
+            IconButton(
+              tooltip: 'Edit',
+              icon: const Icon(Icons.edit),
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final product = _latestProduct;
+                if (product == null) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Load the product first')),
+                  );
+                  return;
+                }
+                final ok = await showModalBottomSheet<bool>(
+                  context: context,
+                  showDragHandle: true,
+                  isScrollControlled: true,
+                  builder: (_) => EditProductSheet(product: product),
+                );
+                if (!mounted) return;
+                if (ok == true) _refresh();
+              },
+            ),
         ],
       ),
       floatingActionButton: loggedIn
           ? FloatingActionButton.extended(
               onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
                 final ok = await showModalBottomSheet<bool>(
                   context: context,
                   showDragHandle: true,
                   isScrollControlled: true,
                   builder: (_) => AddPhotoSheet(barcode: widget.barcode),
                 );
-                if (!context.mounted) return;
+                if (!mounted) return;
                 if (ok == true) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  messenger.showSnackBar(
                     const SnackBar(content: Text('Photo uploaded. Pull to refresh images.')),
                   );
                 }

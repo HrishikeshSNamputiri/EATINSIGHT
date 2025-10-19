@@ -1,0 +1,255 @@
+diff --git a/lib/src/data/off/off_write_api.dart b/lib/src/data/off/off_write_api.dart
+index 1a4e8a2..70d3ee8 100644
+--- a/lib/src/data/off/off_write_api.dart
++++ b/lib/src/data/off/off_write_api.dart
+@@ -30,15 +30,17 @@ class OffWriteApi {
+     required String barcode,
+     String? name,
+     String? brand,
++    String? quantity,
+   }) async {
+     final data = <String, dynamic>{
+       'code': barcode,
+       'user_id': user,
+       'password': pass,
+       'json': '1',
+-      'comment': 'Added via EATINSIGHT',
++      'comment': 'Edited via EATINSIGHT',
+       if (name != null && name.trim().isNotEmpty) 'product_name': name.trim(),
+       if (brand != null && brand.trim().isNotEmpty) 'brands': brand.trim(),
++      if (quantity != null && quantity.trim().isNotEmpty) 'quantity': quantity.trim(),
+     };
+     try {
+       final res = await _dio.post('/cgi/product_jqm2.pl', data: data);
+diff --git a/lib/src/features/product/presentation/product_screen.dart b/lib/src/features/product/presentation/product_screen.dart
+index ce1fa64..4cfbe9e 100644
+--- a/lib/src/features/product/presentation/product_screen.dart
++++ b/lib/src/features/product/presentation/product_screen.dart
+@@ -7,6 +7,7 @@ import '../../../data/models/product.dart';
+ import '../../../routing/app_router.dart';
+ import '../../../data/off/off_auth.dart';
+ import 'add_photo_sheet.dart';
++import 'edit_product_sheet.dart';
+ 
+ class ProductScreen extends StatefulWidget {
+   final String barcode;
+@@ -18,17 +19,32 @@ class ProductScreen extends StatefulWidget {
+ 
+ class _ProductScreenState extends State<ProductScreen> {
+   late Future<Product?> _future;
++  Product? _latestProduct;
+ 
+   @override
+   void initState() {
+     super.initState();
+     _future = context.read<FoodDbRepository>().fetchByBarcode(widget.barcode);
++    _future.then((value) {
++      if (mounted) {
++        setState(() {
++          _latestProduct = value;
++        });
++      }
++    });
+   }
+ 
+   Future<void> _refresh() async {
+     final repo = context.read<FoodDbRepository>();
+     final f = repo.fetchByBarcode(widget.barcode);
+     setState(() => _future = f);
++    f.then((value) {
++      if (mounted) {
++        setState(() {
++          _latestProduct = value;
++        });
++      }
++    });
+     await f;
+   }
+ 
+@@ -40,20 +56,44 @@ class _ProductScreenState extends State<ProductScreen> {
+         title: const Text('Product'),
+         actions: [
+           IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
++          if (loggedIn)
++            IconButton(
++              tooltip: 'Edit',
++              icon: const Icon(Icons.edit),
++              onPressed: () async {
++                final messenger = ScaffoldMessenger.of(context);
++                final product = _latestProduct;
++                if (product == null) {
++                  messenger.showSnackBar(
++                    const SnackBar(content: Text('Load the product first')),
++                  );
++                  return;
++                }
++                final ok = await showModalBottomSheet<bool>(
++                  context: context,
++                  showDragHandle: true,
++                  isScrollControlled: true,
++                  builder: (_) => EditProductSheet(product: product),
++                );
++                if (!mounted) return;
++                if (ok == true) _refresh();
++              },
++            ),
+         ],
+       ),
+       floatingActionButton: loggedIn
+           ? FloatingActionButton.extended(
+               onPressed: () async {
++                final messenger = ScaffoldMessenger.of(context);
+                 final ok = await showModalBottomSheet<bool>(
+                   context: context,
+                   showDragHandle: true,
+                   isScrollControlled: true,
+                   builder: (_) => AddPhotoSheet(barcode: widget.barcode),
+                 );
+-                if (!context.mounted) return;
++                if (!mounted) return;
+                 if (ok == true) {
+-                  ScaffoldMessenger.of(context).showSnackBar(
++                  messenger.showSnackBar(
+                     const SnackBar(content: Text('Photo uploaded. Pull to refresh images.')),
+                   );
+                 }
+diff --git a/lib/src/features/product/presentation/edit_product_sheet.dart b/lib/src/features/product/presentation/edit_product_sheet.dart
+new file mode 100644
+index 0000000..1b8e3fb
+--- /dev/null
++++ b/lib/src/features/product/presentation/edit_product_sheet.dart
+@@ -0,0 +1,134 @@
++import 'package:flutter/material.dart';
++import 'package:provider/provider.dart';
++import '../../../data/off/off_auth.dart';
++import '../../../data/off/off_write_api.dart';
++import '../../../data/models/product.dart';
++
++class EditProductSheet extends StatefulWidget {
++  final Product product;
++  const EditProductSheet({super.key, required this.product});
++
++  @override
++  State<EditProductSheet> createState() => _EditProductSheetState();
++}
++
++class _EditProductSheetState extends State<EditProductSheet> {
++  final _form = GlobalKey<FormState>();
++  late final TextEditingController _nameCtrl;
++  late final TextEditingController _brandCtrl;
++  late final TextEditingController _qtyCtrl;
++  bool _saving = false;
++  String? _error;
++
++  @override
++  void initState() {
++    super.initState();
++    _nameCtrl = TextEditingController(text: widget.product.name ?? '');
++    _brandCtrl = TextEditingController(text: widget.product.brand ?? '');
++    _qtyCtrl = TextEditingController(text: widget.product.quantity ?? '');
++  }
++
++  @override
++  void dispose() {
++    _nameCtrl.dispose();
++    _brandCtrl.dispose();
++    _qtyCtrl.dispose();
++    super.dispose();
++  }
++
++  Future<void> _submit() async {
++    if (!_form.currentState!.validate()) return;
++    final auth = context.read<OffAuth>();
++    final offUser = auth.offUser;
++    if (offUser == null) {
++      setState(() => _error = 'Please sign in under Profile first.');
++      return;
++    }
++    setState(() {
++      _saving = true;
++      _error = null;
++    });
++    try {
++      final res = await OffWriteApi().createOrUpdate(
++        user: offUser.userId,
++        pass: offUser.password,
++        barcode: widget.product.barcode,
++        name: _nameCtrl.text.trim().isEmpty ? null : _nameCtrl.text.trim(),
++        brand: _brandCtrl.text.trim().isEmpty ? null : _brandCtrl.text.trim(),
++        quantity: _qtyCtrl.text.trim().isEmpty ? null : _qtyCtrl.text.trim(),
++      );
++      if (!mounted) return;
++      if (res.ok) {
++        Navigator.of(context).pop(true);
++        ScaffoldMessenger.of(context).showSnackBar(
++          const SnackBar(content: Text('Changes submitted. Pull to refresh.')),
++        );
++      } else {
++        setState(() => _error = res.message);
++      }
++    } finally {
++      if (mounted) setState(() => _saving = false);
++    }
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    return Padding(
++      padding: EdgeInsets.only(
++        left: 16,
++        right: 16,
++        top: 8,
++        bottom: MediaQuery.of(context).padding.bottom + 20,
++      ),
++      child: Form(
++        key: _form,
++        child: Column(
++          mainAxisSize: MainAxisSize.min,
++          crossAxisAlignment: CrossAxisAlignment.start,
++          children: [
++            const Text('Edit product', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
++            const SizedBox(height: 12),
++            Text('Barcode: ${widget.product.barcode}'),
++            const SizedBox(height: 12),
++            TextFormField(
++              controller: _nameCtrl,
++              decoration: const InputDecoration(labelText: 'Name'),
++            ),
++            const SizedBox(height: 12),
++            TextFormField(
++              controller: _brandCtrl,
++              decoration: const InputDecoration(labelText: 'Brand'),
++            ),
++            const SizedBox(height: 12),
++            TextFormField(
++              controller: _qtyCtrl,
++              decoration: const InputDecoration(labelText: 'Quantity (e.g., 330 ml)'),
++            ),
++            if (_error != null) ...[
++              const SizedBox(height: 8),
++              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
++            ],
++            const SizedBox(height: 16),
++            Row(
++              children: [
++                Expanded(
++                  child: OutlinedButton(
++                    onPressed: _saving ? null : () => Navigator.of(context).pop(),
++                    child: const Text('Cancel'),
++                  ),
++                ),
++                const SizedBox(width: 12),
++                Expanded(
++                  child: FilledButton(
++                    onPressed: _saving ? null : _submit,
++                    child: Text(_saving ? 'Submitting...' : 'Submit'),
++                  ),
++                ),
++              ],
++            ),
++          ],
++        ),
++      ),
++    );
++  }
++}

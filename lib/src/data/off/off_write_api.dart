@@ -30,15 +30,17 @@ class OffWriteApi {
     required String barcode,
     String? name,
     String? brand,
+    String? quantity,
   }) async {
     final data = <String, dynamic>{
       'code': barcode,
       'user_id': user,
       'password': pass,
       'json': '1',
-      'comment': 'Added via EATINSIGHT',
+      'comment': 'Edited via EATINSIGHT',
       if (name != null && name.trim().isNotEmpty) 'product_name': name.trim(),
       if (brand != null && brand.trim().isNotEmpty) 'brands': brand.trim(),
+      if (quantity != null && quantity.trim().isNotEmpty) 'quantity': quantity.trim(),
     };
     try {
       final res = await _dio.post('/cgi/product_jqm2.pl', data: data);
