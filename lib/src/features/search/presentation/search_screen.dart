@@ -20,6 +20,7 @@ class _SearchScreenState extends State<SearchScreen> {
   String _current = '';
   String? _category;
   String? _brand;
+  String? _country;
   bool _loading = false;
   bool _hasMore = false;
   int _page = 1;
@@ -60,6 +61,7 @@ class _SearchScreenState extends State<SearchScreen> {
     final parts = raw.split(RegExp(r'\\s+')).where((e) => e.isNotEmpty).toList();
     String? cat;
     String? brand;
+    String? country;
     final leftovers = <String>[];
     for (final part in parts) {
       final lower = part.toLowerCase();
@@ -67,12 +69,14 @@ class _SearchScreenState extends State<SearchScreen> {
         cat = part.substring(4).trim();
       } else if (lower.startsWith('brand:')) {
         brand = part.substring(6).trim();
+      } else if (lower.startsWith('country:')) {
+        country = part.substring(8).trim();
       } else {
         leftovers.add(part);
       }
     }
     final q = leftovers.join(' ').trim();
-    return {'q': q, 'cat': cat, 'brand': brand};
+    return {'q': q, 'cat': cat, 'brand': brand, 'country': country};
   }
 
   Future<void> _startSearch(String v) async {
@@ -82,6 +86,7 @@ class _SearchScreenState extends State<SearchScreen> {
         _current = '';
         _category = null;
         _brand = null;
+        _country = null;
         _items.clear();
         _page = 1;
         _hasMore = false;
@@ -98,11 +103,13 @@ class _SearchScreenState extends State<SearchScreen> {
     final query = parsed['q']?.trim() ?? '';
     final cat = parsed['cat']?.trim();
     final brand = parsed['brand']?.trim();
-    if (query.isEmpty && (cat == null || cat.isEmpty) && (brand == null || brand.isEmpty)) {
+    final country = parsed['country']?.trim();
+    if (query.isEmpty && (cat == null || cat.isEmpty) && (brand == null || brand.isEmpty) && (country == null || country.isEmpty)) {
       setState(() {
         _current = '';
         _category = null;
         _brand = null;
+        _country = null;
         _items.clear();
         _page = 1;
         _hasMore = false;
@@ -114,6 +121,7 @@ class _SearchScreenState extends State<SearchScreen> {
       _current = query;
       _category = cat?.isEmpty ?? true ? null : cat;
       _brand = brand?.isEmpty ?? true ? null : brand;
+      _country = country?.isEmpty ?? true ? null : country;
       _items.clear();
       _page = 1;
       _hasMore = false;
@@ -133,6 +141,7 @@ class _SearchScreenState extends State<SearchScreen> {
       page: _page,
       categoryEn: _category,
       brandEn: _brand,
+      countryEn: _country,
     );
     if (!mounted) return;
     setState(() {
@@ -155,7 +164,7 @@ class _SearchScreenState extends State<SearchScreen> {
               controller: _q,
               decoration: InputDecoration(
                 labelText: 'Search products',
-                hintText: 'Try "cola", "cat:chocolates", or "brand:nestle"',
+                hintText: 'Try "cola", "cat:chocolates", "brand:nestle", or "country:India"',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: (_current.isNotEmpty || _q.text.isNotEmpty)
                     ? IconButton(
@@ -184,7 +193,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Widget _buildResults(BuildContext context) {
     final hasQuery =
-        _current.isNotEmpty || (_category != null) || (_brand != null);
+        _current.isNotEmpty || (_category != null) || (_brand != null) || (_country != null);
     if (!hasQuery) {
       return const Center(child: Text('Type to search'));
     }

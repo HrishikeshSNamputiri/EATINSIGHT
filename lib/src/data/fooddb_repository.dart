@@ -26,6 +26,7 @@ class FoodDbRepository {
     int page = 1,
     String? categoryEn,
     String? brandEn,
+    String? countryEn,
   }) async {
     try {
       return await _search.search(
@@ -34,6 +35,7 @@ class FoodDbRepository {
         pageSize: 20,
         categoryEn: categoryEn,
         brandEn: brandEn,
+        countryEn: countryEn,
       );
     } catch (_) {
       return <Product>[];

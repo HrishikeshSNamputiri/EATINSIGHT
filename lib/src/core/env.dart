@@ -10,6 +10,10 @@ class Env {
   /// Optional: preferred locale for OFF queries (used in Step 10+)
   static const String offPreferredLocale = 'en';
 
+  /// Optional default country name (English) for search filtering.
+  /// Examples: "India", "United States", "France". Leave empty for none.
+  static const String offDefaultCountryEn = '';
+
   /// OFF write base — use .net for write operations
   static const String offWriteBaseUrl = 'https://world.openfoodfacts.net';
 

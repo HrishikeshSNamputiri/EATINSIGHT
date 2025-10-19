@@ -1,0 +1,70 @@
+diff --git a/lib/src/data/off/off_search_api.dart b/lib/src/data/off/off_search_api.dart
+index 9834932..0d1bc50 100644
+--- a/lib/src/data/off/off_search_api.dart
++++ b/lib/src/data/off/off_search_api.dart
+@@ -1,6 +1,8 @@
+ import 'package:dio/dio.dart';
+ import '../../core/env.dart';
+ import '../models/product.dart';
++import 'dart:developer' as dev;
++import 'dart:ui' show PlatformDispatcher;
+ 
+ class OffSearchApi {
+   final Dio _dio;
+@@ -26,15 +28,32 @@ class OffSearchApi {
+     int pageSize = 20,
+     String? categoryEn,
+     String? brandEn,
++    String? countryEn,
+   }) async {
+     final q = query.trim();
+-    final hasFilters = (categoryEn != null && categoryEn.trim().isNotEmpty) ||
+-        (brandEn != null && brandEn.trim().isNotEmpty);
+-    if (q.isEmpty && !hasFilters) return <Product>[];
++    final hasTagFilters = (categoryEn != null && categoryEn.trim().isNotEmpty) ||
++        (brandEn != null && brandEn.trim().isNotEmpty) ||
++        (countryEn != null && countryEn.trim().isNotEmpty);
++    if (q.isEmpty && !hasTagFilters) return <Product>[];
++
++    String resolvedCountryEn = (countryEn?.trim() ?? '').isNotEmpty
++        ? countryEn!.trim()
++        : (Env.offDefaultCountryEn);
++    if (resolvedCountryEn.isEmpty) {
++      final cc = PlatformDispatcher.instance.locale.countryCode?.toUpperCase();
++      const quick = {
++        'IN': 'India',
++        'US': 'United States',
++        'FR': 'France',
++        'DE': 'Germany',
++        'GB': 'United Kingdom',
++      };
++      resolvedCountryEn = quick[cc ?? ''] ?? '';
++    }
++
+     final params = <String, String>{
+       if (q.isNotEmpty) 'search_terms': q,
+-      if (q.isNotEmpty) 'search': q,
+-      'sort_by': 'product_name',
++      'sort_by': 'last_modified_t',
+       'nocache': '1',
+       'page': '$page',
+       'page_size': '$pageSize',
+@@ -42,6 +61,8 @@ class OffSearchApi {
+         'categories_tags_en': categoryEn.trim(),
+       if (brandEn != null && brandEn.trim().isNotEmpty)
+         'brands_tags_en': brandEn.trim(),
++      if (resolvedCountryEn.isNotEmpty)
++        'countries_tags_en': resolvedCountryEn,
+       'fields':
+           'code,product_name,product_name_${Env.offPreferredLocale},brands,image_front_url',
+     };
+@@ -49,6 +70,9 @@ class OffSearchApi {
+       '/api/v2/search',
+       queryParameters: params,
+     );
++    try {
++      dev.log('[OFF] GET \${resp.requestOptions.uri}');
++    } catch (_) {}
+     if (resp.statusCode != 200) return <Product>[];
+     final body = resp.data;
+     final prods = (body is Map && body['products'] is List)
