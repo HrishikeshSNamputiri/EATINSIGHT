@@ -53,10 +53,6 @@ class OffSearchApi {
         queryParams['countries_tags_en'] = resolvedCountryEn;
       }
     }
-    queryParams['nocache'] = '1';
-    queryParams['fields'] =
-        'code,product_name,product_name_${Env.offPreferredLocale},brands,image_front_url';
-
     final resp = await _dio.get(
       '/api/v2/search',
       queryParameters: queryParams,
@@ -79,7 +75,7 @@ class OffSearchApi {
           .where((s) => s.isNotEmpty)
           .toList()
           .firstOrNull;
-      final String? img = p['image_front_url'] as String?;
+      final String? img = (p['image_small_url'] ?? p['image_front_url']) as String?;
       return Product(
         barcode: code,
         name: name,

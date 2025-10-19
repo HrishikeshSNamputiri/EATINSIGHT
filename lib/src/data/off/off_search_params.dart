@@ -5,6 +5,8 @@ class OffSearchParams {
   final String? categoryEn;
   final String? brandEn;
   final String? countryEn;
+  /// Comma-separated list of fields requested from the API.
+  final String fields;
   final String? languageCode; // ISO 639-1, e.g. "en"
   final String? countryCode; // ISO 3166-1 alpha-2, e.g. "in"
   final int page;
@@ -15,6 +17,7 @@ class OffSearchParams {
     this.categoryEn,
     this.brandEn,
     this.countryEn,
+    this.fields = 'code,product_name,brands,quantity,image_small_url',
     this.languageCode,
     this.countryCode,
     this.page = 1,
@@ -23,11 +26,17 @@ class OffSearchParams {
 
   Map<String, dynamic> toQueryMap() {
     final map = <String, dynamic>{
-      'search_simple': 1,
+      // General knobs
       'json': 1,
-      'sort_by': 'last_modified_t',
+      'search_simple': 1,
+      'nocache': 1,
+      // Sort by product name when user typed keywords, else stick with recency.
+      'sort_by': (query != null && query!.trim().isNotEmpty) ? 'product_name' : 'last_modified_t',
+      // Paging
       'page': page,
       'page_size': pageSize,
+      // Trim response payload
+      'fields': fields,
     };
     if (query != null) {
       final q = query!.trim();

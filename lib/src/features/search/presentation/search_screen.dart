@@ -151,7 +151,7 @@ class _SearchScreenState extends State<SearchScreen> {
     setState(() {
       _items.addAll(list);
       _page += 1;
-      _hasMore = list.length >= _pageSize;
+      _hasMore = _current.isEmpty && list.length >= _pageSize;
       _loading = false;
     });
   }
@@ -197,14 +197,26 @@ class _SearchScreenState extends State<SearchScreen> {
               if (prefs.language != null && prefs.language!.trim().isNotEmpty) {
                 segments.add('lc=${prefs.language!.trim()}');
               }
-              if (segments.isEmpty) return const SizedBox.shrink();
+              final keyword = _current.trim();
+              if (segments.isEmpty && keyword.isEmpty) return const SizedBox.shrink();
               return Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Align(
                   alignment: Alignment.centerLeft,
-                  child: Text(
-                    'Applied preferences: ${segments.join(', ')}',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (segments.isNotEmpty)
+                        Text(
+                          'Applied preferences: ${segments.join(', ')}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      if (keyword.isNotEmpty)
+                        Text(
+                          'Keyword: "$keyword"',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                    ],
                   ),
                 ),
               );

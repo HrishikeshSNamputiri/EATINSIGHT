@@ -42,7 +42,15 @@ class FoodDbRepository {
         page: page,
         pageSize: 20,
       );
-      return await _search.search(params: params);
+      final products = await _search.search(params: params);
+      final trimmed = query.trim();
+      if (trimmed.isEmpty) return products;
+      final keyword = trimmed.toLowerCase();
+      return products.where((product) {
+        final name = (product.name ?? '').toLowerCase();
+        final brand = (product.brand ?? '').toLowerCase();
+        return name.contains(keyword) || brand.contains(keyword);
+      }).toList();
     } catch (_) {
       return <Product>[];
     }

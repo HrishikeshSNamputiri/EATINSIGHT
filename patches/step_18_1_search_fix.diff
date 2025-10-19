@@ -1,0 +1,130 @@
+diff --git a/lib/src/data/fooddb_repository.dart b/lib/src/data/fooddb_repository.dart
+index a4fa75e..15e520c 100644
+--- a/lib/src/data/fooddb_repository.dart
++++ b/lib/src/data/fooddb_repository.dart
+@@ -42,7 +42,15 @@ class FoodDbRepository {
+         page: page,
+         pageSize: 20,
+       );
+-      return await _search.search(params: params);
++      final products = await _search.search(params: params);
++      final trimmed = query.trim();
++      if (trimmed.isEmpty) return products;
++      final keyword = trimmed.toLowerCase();
++      return products.where((product) {
++        final name = (product.name ?? '').toLowerCase();
++        final brand = (product.brand ?? '').toLowerCase();
++        return name.contains(keyword) || brand.contains(keyword);
++      }).toList();
+     } catch (_) {
+       return <Product>[];
+     }
+diff --git a/lib/src/data/off/off_search_api.dart b/lib/src/data/off/off_search_api.dart
+index d55d665..aed7797 100644
+--- a/lib/src/data/off/off_search_api.dart
++++ b/lib/src/data/off/off_search_api.dart
+@@ -53,10 +53,6 @@ class OffSearchApi {
+         queryParams['countries_tags_en'] = resolvedCountryEn;
+       }
+     }
+-    queryParams['nocache'] = '1';
+-    queryParams['fields'] =
+-        'code,product_name,product_name_${Env.offPreferredLocale},brands,image_front_url';
+-
+     final resp = await _dio.get(
+       '/api/v2/search',
+       queryParameters: queryParams,
+@@ -79,7 +75,7 @@ class OffSearchApi {
+           .where((s) => s.isNotEmpty)
+           .toList()
+           .firstOrNull;
+-      final String? img = p['image_front_url'] as String?;
++      final String? img = (p['image_small_url'] ?? p['image_front_url']) as String?;
+       return Product(
+         barcode: code,
+         name: name,
+diff --git a/lib/src/data/off/off_search_params.dart b/lib/src/data/off/off_search_params.dart
+index 0d68f5d..572a13d 100644
+--- a/lib/src/data/off/off_search_params.dart
++++ b/lib/src/data/off/off_search_params.dart
+@@ -5,6 +5,8 @@ class OffSearchParams {
+   final String? categoryEn;
+   final String? brandEn;
+   final String? countryEn;
++  /// Comma-separated list of fields requested from the API.
++  final String fields;
+   final String? languageCode; // ISO 639-1, e.g. "en"
+   final String? countryCode; // ISO 3166-1 alpha-2, e.g. "in"
+   final int page;
+@@ -15,6 +17,7 @@ class OffSearchParams {
+     this.categoryEn,
+     this.brandEn,
+     this.countryEn,
++    this.fields = 'code,product_name,brands,quantity,image_small_url',
+     this.languageCode,
+     this.countryCode,
+     this.page = 1,
+@@ -23,11 +26,17 @@ class OffSearchParams {
+ 
+   Map<String, dynamic> toQueryMap() {
+     final map = <String, dynamic>{
+-      'search_simple': 1,
++      // General knobs
+       'json': 1,
+-      'sort_by': 'last_modified_t',
++      'search_simple': 1,
++      'nocache': 1,
++      // Sort by product name when user typed keywords, else stick with recency.
++      'sort_by': (query != null && query!.trim().isNotEmpty) ? 'product_name' : 'last_modified_t',
++      // Paging
+       'page': page,
+       'page_size': pageSize,
++      // Trim response payload
++      'fields': fields,
+     };
+     if (query != null) {
+       final q = query!.trim();
+diff --git a/lib/src/features/search/presentation/search_screen.dart b/lib/src/features/search/presentation/search_screen.dart
+index 0a6f8f1..5b03c43 100644
+--- a/lib/src/features/search/presentation/search_screen.dart
++++ b/lib/src/features/search/presentation/search_screen.dart
+@@ -151,7 +151,7 @@ class _SearchScreenState extends State<SearchScreen> {
+     setState(() {
+       _items.addAll(list);
+       _page += 1;
+-      _hasMore = list.length >= _pageSize;
++      _hasMore = _current.isEmpty && list.length >= _pageSize;
+       _loading = false;
+     });
+   }
+@@ -197,14 +197,26 @@ class _SearchScreenState extends State<SearchScreen> {
+               if (prefs.language != null && prefs.language!.trim().isNotEmpty) {
+                 segments.add('lc=${prefs.language!.trim()}');
+               }
+-              if (segments.isEmpty) return const SizedBox.shrink();
++              final keyword = _current.trim();
++              if (segments.isEmpty && keyword.isEmpty) return const SizedBox.shrink();
+               return Padding(
+                 padding: const EdgeInsets.symmetric(horizontal: 16),
+                 child: Align(
+                   alignment: Alignment.centerLeft,
+-                  child: Text(
+-                    'Applied preferences: ${segments.join(', ')}',
+-                    style: Theme.of(context).textTheme.bodySmall,
++                  child: Column(
++                    crossAxisAlignment: CrossAxisAlignment.start,
++                    children: [
++                      if (segments.isNotEmpty)
++                        Text(
++                          'Applied preferences: ${segments.join(', ')}',
++                          style: Theme.of(context).textTheme.bodySmall,
++                        ),
++                      if (keyword.isNotEmpty)
++                        Text(
++                          'Keyword: "$keyword"',
++                          style: Theme.of(context).textTheme.bodySmall,
++                        ),
++                    ],
+                   ),
+                 ),
+               );
