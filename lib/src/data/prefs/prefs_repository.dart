@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 // ignore: depend_on_referenced_packages
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import '../off/off_config.dart';
 import 'user_prefs.dart';
 
 class PrefsRepository {
@@ -49,6 +50,7 @@ class PrefsController extends ChangeNotifier {
     notifyListeners();
     try {
       _prefs = await _repo.load();
+      OffConfig.applyPrefs(_prefs);
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -59,6 +61,7 @@ class PrefsController extends ChangeNotifier {
 
   Future<void> update(UserPrefs next) async {
     _prefs = next;
+    OffConfig.applyPrefs(_prefs);
     notifyListeners();
     await _repo.save(next);
   }

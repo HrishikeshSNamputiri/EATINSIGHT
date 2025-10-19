@@ -2,93 +2,166 @@ import 'package:flutter/material.dart';
 import '../../../data/models/product.dart';
 
 class SearchResultTile extends StatelessWidget {
-  final Product product;
-  final List<String> tokens;
-  final VoidCallback onTap;
-
   const SearchResultTile({
     super.key,
     required this.product,
-    required this.tokens,
     required this.onTap,
   });
 
-  TextSpan _buildHighlightedSpan(String text, TextStyle? baseStyle) {
-    if (text.isEmpty || tokens.isEmpty) {
-      return TextSpan(text: text, style: baseStyle);
-    }
-    final lower = text.toLowerCase();
-    final spans = <TextSpan>[];
-    int index = 0;
-    while (index < text.length) {
-      int matchLength = 0;
-      for (final token in tokens) {
-        if (token.isEmpty) continue;
-        if (lower.startsWith(token, index) && token.length > matchLength) {
-          matchLength = token.length;
-        }
-      }
-      if (matchLength == 0) {
-        spans.add(TextSpan(text: text[index], style: baseStyle));
-        index += 1;
-      } else {
-        spans.add(TextSpan(
-          text: text.substring(index, index + matchLength),
-          style: baseStyle?.copyWith(fontWeight: FontWeight.bold),
-        ));
-        index += matchLength;
-      }
-    }
-    return TextSpan(children: spans);
-  }
+  final Product product;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final nameStyle = theme.textTheme.bodyLarge;
-    final brandStyle = theme.textTheme.bodyMedium;
-    final name = product.name ?? 'Unnamed product';
-    final brand = product.brand ?? '';
+    final ThemeData theme = Theme.of(context);
+    final String name = product.name?.trim().isNotEmpty == true
+        ? product.name!.trim()
+        : 'Unnamed product';
+    final String? brand =
+        product.brand?.trim().isNotEmpty == true ? product.brand!.trim() : null;
+    final String? quantity =
+        product.quantity?.trim().isNotEmpty == true ? product.quantity : null;
+    final String? grade = product.nutritionGrade?.trim().isNotEmpty == true
+        ? product.nutritionGrade!.trim().toUpperCase()
+        : null;
 
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      leading: _ResultThumbnail(url: product.imageUrl),
-      title: RichText(
-        text: _buildHighlightedSpan(name, nameStyle),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              _Thumbnail(url: product.imageUrl),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    if (brand != null || quantity != null) ...<Widget>[
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: <Widget>[
+                          if (brand != null)
+                            Text(
+                              brand,
+                              style: theme.textTheme.bodyMedium,
+                            ),
+                          if (quantity != null)
+                            Text(
+                              quantity,
+                              style: theme.textTheme.bodySmall
+                                  ?.copyWith(color: theme.hintColor),
+                            ),
+                        ],
+                      ),
+                    ],
+                    if (grade != null) ...<Widget>[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: _NutritionBadge(grade: grade),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.chevron_right,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
       ),
-      subtitle: brand.isEmpty
-          ? null
-          : RichText(
-              text: _buildHighlightedSpan(brand, brandStyle),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-      onTap: onTap,
-      trailing: const Icon(Icons.chevron_right),
     );
   }
 }
 
-class _ResultThumbnail extends StatelessWidget {
+class _Thumbnail extends StatelessWidget {
+  const _Thumbnail({required this.url});
+
   final String? url;
-  const _ResultThumbnail({required this.url});
 
   @override
   Widget build(BuildContext context) {
-    const size = 52.0;
+    const double size = 64;
+    final BorderRadius radius = BorderRadius.circular(12);
     if (url == null || url!.isEmpty) {
-      final color = Theme.of(context).colorScheme.surfaceContainerHighest;
-      return CircleAvatar(
-        radius: size / 2,
-        backgroundColor: color,
-        child: const Icon(Icons.inventory_2, size: 24),
+      final Color color = Theme.of(context).colorScheme.surfaceContainerHighest;
+      return Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: radius,
+        ),
+        child: const Icon(Icons.inventory_2, size: 26),
       );
     }
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.network(url!, width: size, height: size, fit: BoxFit.cover),
+      borderRadius: radius,
+      child: Image.network(
+        url!,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+      ),
+    );
+  }
+}
+
+class _NutritionBadge extends StatelessWidget {
+  const _NutritionBadge({required this.grade});
+
+  final String grade;
+
+  Color _backgroundColor(BuildContext context) {
+    switch (grade) {
+      case 'A':
+        return Colors.green.shade500;
+      case 'B':
+        return Colors.lightGreen.shade600;
+      case 'C':
+        return Colors.orange.shade600;
+      case 'D':
+        return Colors.deepOrange.shade700;
+      case 'E':
+        return Colors.red.shade700;
+      default:
+        return Theme.of(context).colorScheme.primary;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final Color bg = _backgroundColor(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        'Nutri-Score $grade',
+        style: Theme.of(context)
+            .textTheme
+            .labelMedium
+            ?.copyWith(color: Colors.white),
+      ),
     );
   }
 }

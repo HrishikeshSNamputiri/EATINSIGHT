@@ -1,0 +1,1570 @@
+diff --git a/lib/src/data/fooddb_repository.dart b/lib/src/data/fooddb_repository.dart
+index 59d03e4..2200479 100644
+--- a/lib/src/data/fooddb_repository.dart
++++ b/lib/src/data/fooddb_repository.dart
+@@ -4,6 +4,7 @@ import 'off/off_write_api.dart';
+ import 'off/off_auth.dart';
+ import 'off/off_search_api.dart';
+ import 'off/off_search_params.dart';
++import '../core/env.dart';
+ import 'models/product.dart';
+ 
+ /// Repository that now uses the Open Food Facts REST API (read-only in this step).
+@@ -22,32 +23,53 @@ class FoodDbRepository {
+   }
+ 
+   /// Search products (OFF v2). Page is 1-based.
+-  Future<List<Product>> searchProducts(
++  Future<OffSearchResponse> searchProducts(
+     String query, {
+     int page = 1,
+-    String? categoryEn,
+-    String? brandEn,
+-    String? countryEn,
+     String? languageCode,
+     String? countryCode,
+-    List<String> tokens = const <String>[],
++    bool world = false,
+   }) async {
+     try {
++      final preferredLocale = Env.offPreferredLocale.toLowerCase();
++      final normalizedLanguage = languageCode?.trim().toLowerCase();
++      final fields = <String>{
++        'code',
++        'product_name',
++        'generic_name',
++        'brands',
++        'image_small_url',
++        'image_front_small_url',
++        'selected_images',
++      };
++      if (preferredLocale.isNotEmpty) {
++        fields
++          ..add('product_name_$preferredLocale')
++          ..add('generic_name_$preferredLocale');
++      }
++      if (normalizedLanguage != null && normalizedLanguage.isNotEmpty) {
++        fields
++          ..add('product_name_$normalizedLanguage')
++          ..add('generic_name_$normalizedLanguage');
++      }
+       final params = OffSearchParams(
+         query: query,
+-        categoryEn: categoryEn,
+-        brandEn: brandEn,
+-        countryEn: countryEn,
+         languageCode: languageCode,
+         countryCode: countryCode,
+-        tokens: tokens,
+         preferNameSort: true,
+         page: page,
+         pageSize: 20,
++        fields: fields.join(','),
++        world: world,
+       );
+       return await _search.search(params: params);
+     } catch (_) {
+-      return <Product>[];
++      return const OffSearchResponse(
++        products: <Product>[],
++        totalCount: 0,
++        page: 1,
++        pageCount: 0,
++      );
+     }
+   }
+ }
+diff --git a/lib/src/data/off/off_config.dart b/lib/src/data/off/off_config.dart
+index eed38b3..fa8510c 100644
+--- a/lib/src/data/off/off_config.dart
++++ b/lib/src/data/off/off_config.dart
+@@ -1,5 +1,7 @@
+ import 'package:openfoodfacts/openfoodfacts.dart';
+ 
++import '../prefs/user_prefs.dart';
++
+ class OffConfig {
+   static void init() {
+     // Identify our app to OFF (recommended)
+@@ -15,4 +17,16 @@ class OffConfig {
+     // Comment this line in if you want to default a country context:
+     // OpenFoodAPIConfiguration.globalCountry = OpenFoodFactsCountry.WORLD;
+   }
++
++  static void applyPrefs(UserPrefs prefs) {
++    final String? languageCode = prefs.language?.trim().toLowerCase();
++    final OpenFoodFactsLanguage resolvedLanguage =
++        OpenFoodFactsLanguage.fromOffTag(languageCode) ??
++            OpenFoodFactsLanguage.ENGLISH;
++    OpenFoodAPIConfiguration.globalLanguages = <OpenFoodFactsLanguage>[
++      resolvedLanguage,
++    ];
++    // Keep country null here; concrete queries provide the country context.
++    OpenFoodAPIConfiguration.globalCountry = null;
++  }
+ }
+diff --git a/lib/src/data/off/off_search_api.dart b/lib/src/data/off/off_search_api.dart
+index aed7797..4af9a71 100644
+--- a/lib/src/data/off/off_search_api.dart
++++ b/lib/src/data/off/off_search_api.dart
+@@ -1,91 +1,274 @@
+-import 'dart:developer' as dev;
+-import 'dart:ui' show PlatformDispatcher;
+-import 'package:dio/dio.dart';
++import 'package:openfoodfacts/openfoodfacts.dart' as off;
++
+ import '../../core/env.dart';
+ import '../models/product.dart';
++import '../prefs/lookup_tables.dart';
+ import 'off_search_params.dart';
+ 
++class OffSearchResponse {
++  const OffSearchResponse({
++    required this.products,
++    required this.totalCount,
++    required this.page,
++    required this.pageCount,
++  });
++
++  final List<Product> products;
++  final int totalCount;
++  final int page;
++  final int pageCount;
++}
++
+ class OffSearchApi {
+-  final Dio _dio;
+-  OffSearchApi({Dio? dio})
+-      : _dio = dio ??
+-            Dio(
+-              BaseOptions(
+-                baseUrl: Env.offApiBaseUrl,
+-                connectTimeout: const Duration(seconds: 15),
+-                receiveTimeout: const Duration(seconds: 20),
+-                headers: const {
+-                  'Accept': 'application/json',
+-                  'User-Agent': 'EATINSIGHT/0.0.1 (Android)',
+-                },
+-              ),
+-            );
+-
+-  /// Search products on OFF v2.
+-  /// Returns a list of minimal Product models for the given page (1-based).
+-  Future<List<Product>> search({required OffSearchParams params}) async {
+-    final q = (params.query ?? '').trim();
+-    final hasTagFilters = (params.categoryEn != null && params.categoryEn!.trim().isNotEmpty) ||
+-        (params.brandEn != null && params.brandEn!.trim().isNotEmpty) ||
+-        (params.countryEn != null && params.countryEn!.trim().isNotEmpty);
+-    if (q.isEmpty && !hasTagFilters) return <Product>[];
+-
+-    final queryParams = params.toQueryMap();
+-    // Fallback country preference if none supplied.
+-    String resolvedCountryEn = '';
+-    final maybeCountry = queryParams['countries_tags_en'] as String?;
+-    if (maybeCountry == null || maybeCountry.trim().isEmpty) {
+-      final fallback = Env.offDefaultCountryEn.trim();
+-      if (fallback.isNotEmpty) {
+-        resolvedCountryEn = fallback;
+-      } else {
+-        final cc = PlatformDispatcher.instance.locale.countryCode?.toUpperCase();
+-        const quick = {
+-          'IN': 'India',
+-          'US': 'United States',
+-          'FR': 'France',
+-          'DE': 'Germany',
+-          'GB': 'United Kingdom',
+-        };
+-        resolvedCountryEn = quick[cc ?? ''] ?? '';
+-      }
+-      if (resolvedCountryEn.isNotEmpty) {
+-        queryParams['countries_tags_en'] = resolvedCountryEn;
+-      }
++  const OffSearchApi();
++
++  Future<OffSearchResponse> search({required OffSearchParams params}) async {
++    final String query = (params.query ?? '').trim();
++    final bool hasFilters =
++        (params.categoryEn != null && params.categoryEn!.trim().isNotEmpty) ||
++            (params.brandEn != null && params.brandEn!.trim().isNotEmpty);
++
++    if (query.isEmpty && !hasFilters) {
++      return OffSearchResponse(
++        products: const <Product>[],
++        totalCount: 0,
++        page: params.page,
++        pageCount: 0,
++      );
+     }
+-    final resp = await _dio.get(
+-      '/api/v2/search',
+-      queryParameters: queryParams,
++
++    final off.OpenFoodFactsLanguage? language =
++        _languageFromCode(params.languageCode ?? Env.offPreferredLocale);
++    final off.OpenFoodFactsCountry? country =
++        params.world ? null : _countryFromParams(params);
++
++    final off.ProductSearchQueryConfiguration configuration =
++        off.ProductSearchQueryConfiguration(
++      language: language,
++      country: country,
++      fields: _searchFields,
++      parametersList: <off.Parameter>[
++        off.PageSize(size: params.pageSize),
++        off.PageNumber(page: params.page),
++        off.SearchTerms(terms: <String>[query]),
++        const off.SortBy(option: off.SortOption.PRODUCT_NAME),
++      ],
++      version: off.ProductQueryVersion.v3,
+     );
++
++    final off.UriProductHelper uriHelper = _uriHelper;
++
+     try {
+-      dev.log('[OFF] GET \${resp.requestOptions.uri}');
+-    } catch (_) {}
+-    if (resp.statusCode != 200) return <Product>[];
+-    final body = resp.data;
+-    final prods = (body is Map && body['products'] is List)
+-        ? (body['products'] as List)
+-        : const <dynamic>[];
+-    return prods.whereType<Map>().map((p) {
+-      final String code = (p['code'] ?? '').toString();
+-      final String? name = (p['product_name_${Env.offPreferredLocale}'] as String?) ??
+-          (p['product_name'] as String?);
+-      final String? brand = (p['brands'] as String?)
+-          ?.split(',')
+-          .map((s) => s.trim())
+-          .where((s) => s.isNotEmpty)
+-          .toList()
+-          .firstOrNull;
+-      final String? img = (p['image_small_url'] ?? p['image_front_url']) as String?;
+-      return Product(
+-        barcode: code,
+-        name: name,
+-        brand: brand,
+-        imageUrl: img,
++      final off.SearchResult result =
++          await off.OpenFoodAPIClient.searchProducts(
++        off.OpenFoodAPIConfiguration.getUser(null),
++        configuration,
++        uriHelper: uriHelper,
++      );
++
++      final List<Product> products = <Product>[];
++      final Iterable<off.Product> rawProducts =
++          (result.products ?? const <off.Product>[]);
++      for (final off.Product source in rawProducts) {
++        final Product? mapped = _mapProduct(
++          source: source,
++          preferredLanguage: language,
++        );
++        if (mapped != null) {
++          products.add(mapped);
++        }
++      }
++
++      final int totalCount = result.count ?? products.length;
++      final int currentPage = result.page ?? params.page;
++      final int pageCount = result.pageCount ?? 0;
++
++      return OffSearchResponse(
++        products: products,
++        totalCount: totalCount,
++        page: currentPage,
++        pageCount: pageCount,
++      );
++    } catch (_) {
++      return OffSearchResponse(
++        products: const <Product>[],
++        totalCount: 0,
++        page: params.page,
++        pageCount: 0,
+       );
+-    }).toList();
++    }
++  }
++
++  static Product? _mapProduct({
++    required off.Product source,
++    required off.OpenFoodFactsLanguage? preferredLanguage,
++  }) {
++    final String? barcode = source.barcode;
++    if (barcode == null || barcode.trim().isEmpty) {
++      return null;
++    }
++    final String? name = _bestLocalizedValue(
++          source.productNameInLanguages,
++          preferredLanguage,
++        ) ??
++        _fallbackNames(source, preferredLanguage);
++
++    final String? brand = _firstNonEmpty(
++      <String?>[
++        source.brands,
++        source.brandsTags?.join(', '),
++      ],
++    );
++
++    final String? imageUrl = _firstNonEmpty(
++      <String?>[
++        source.imageFrontSmallUrl,
++        source.imageFrontUrl,
++        source.imagePackagingSmallUrl,
++        source.imagePackagingUrl,
++      ],
++    );
++
++    final String? ingredients = _firstNonEmpty(
++      <String?>[
++        _bestLocalizedValue(
++          source.ingredientsTextInLanguages,
++          preferredLanguage,
++        ),
++        source.ingredientsText,
++      ],
++    );
++
++    return Product(
++      barcode: barcode,
++      name: name,
++      brand: brand,
++      imageUrl: imageUrl,
++      quantity: source.quantity,
++      ingredientsText: ingredients,
++      nutritionGrade: source.nutriscore,
++    );
++  }
++
++  static off.OpenFoodFactsLanguage? _languageFromCode(String? code) {
++    final String normalized = (code ?? '').trim().toLowerCase();
++    if (normalized.isEmpty) {
++      return null;
++    }
++    return off.OpenFoodFactsLanguage.fromOffTag(normalized);
++  }
++
++  static off.OpenFoodFactsCountry? _countryFromParams(
++    OffSearchParams params,
++  ) {
++    final String? explicitCode = params.countryCode?.trim();
++    if (explicitCode != null && explicitCode.isNotEmpty) {
++      final off.OpenFoodFactsCountry? byCode =
++          off.OpenFoodFactsCountry.fromOffTag(explicitCode.toLowerCase());
++      if (byCode != null) {
++        return byCode;
++      }
++    }
++    final String? countryName = params.countryEn?.trim();
++    if (countryName != null && countryName.isNotEmpty) {
++      final CodeName match = kCountries.firstWhere(
++        (CodeName entry) =>
++            entry.name.toLowerCase() == countryName.toLowerCase(),
++        orElse: () => CodeName(countryName, countryName),
++      );
++      final off.OpenFoodFactsCountry? byName =
++          off.OpenFoodFactsCountry.fromOffTag(match.code.toLowerCase());
++      if (byName != null) {
++        return byName;
++      }
++    }
++    final String fallback = Env.offDefaultCountryEn.trim();
++    if (fallback.isNotEmpty) {
++      final CodeName matched = kCountries.firstWhere(
++        (CodeName entry) => entry.name.toLowerCase() == fallback.toLowerCase(),
++        orElse: () => CodeName(fallback, fallback),
++      );
++      return off.OpenFoodFactsCountry.fromOffTag(
++        matched.code.toLowerCase(),
++      );
++    }
++    return null;
+   }
+-}
+ 
+-extension<T> on Iterable<T> {
+-  T? get firstOrNull => isEmpty ? null : first;
++  static String? _bestLocalizedValue(
++    Map<off.OpenFoodFactsLanguage, String>? values,
++    off.OpenFoodFactsLanguage? preferred,
++  ) {
++    if (values == null || values.isEmpty) {
++      return null;
++    }
++    if (preferred != null && values.containsKey(preferred)) {
++      final String? value = values[preferred];
++      if (value != null && value.trim().isNotEmpty) {
++        return value.trim();
++      }
++    }
++    for (final off.OpenFoodFactsLanguage language in values.keys) {
++      final String? value = values[language];
++      if (value != null && value.trim().isNotEmpty) {
++        return value.trim();
++      }
++    }
++    return null;
++  }
++
++  static String? _fallbackNames(
++    off.Product source,
++    off.OpenFoodFactsLanguage? preferred,
++  ) =>
++      _firstNonEmpty(
++        <String?>[
++          source.productName,
++          source.genericName,
++          _bestLocalizedValue(source.genericNameInLanguages, preferred),
++          source.lang != null
++              ? _bestLocalizedValue(
++                  source.productNameInLanguages,
++                  source.lang,
++                )
++              : null,
++        ],
++      );
++
++  static String? _firstNonEmpty(Iterable<String?> values) {
++    for (final String? value in values) {
++      if (value != null && value.trim().isNotEmpty) {
++        return value.trim();
++      }
++    }
++    return null;
++  }
++
++  static final List<off.ProductField> _searchFields = <off.ProductField>[
++    off.ProductField.BARCODE,
++    off.ProductField.NAME,
++    off.ProductField.NAME_ALL_LANGUAGES,
++    off.ProductField.GENERIC_NAME,
++    off.ProductField.GENERIC_NAME_ALL_LANGUAGES,
++    off.ProductField.BRANDS,
++    off.ProductField.QUANTITY,
++    off.ProductField.NUTRISCORE,
++    off.ProductField.INGREDIENTS_TEXT,
++    off.ProductField.INGREDIENTS_TEXT_ALL_LANGUAGES,
++    off.ProductField.ALLERGENS,
++    off.ProductField.NUTRIMENTS,
++    off.ProductField.IMAGE_FRONT_URL,
++    off.ProductField.IMAGE_FRONT_SMALL_URL,
++    off.ProductField.IMAGE_PACKAGING_URL,
++    off.ProductField.IMAGE_PACKAGING_SMALL_URL,
++  ];
++
++  static off.UriProductHelper get _uriHelper {
++    final Uri parsed = Uri.parse(Env.offApiBaseUrl);
++    final String host = parsed.host;
++    final List<String> parts = host.split('.');
++    final String domain =
++        parts.length >= 2 ? parts.sublist(parts.length - 2).join('.') : host;
++    return off.UriProductHelper(domain: domain);
++  }
+ }
+diff --git a/lib/src/data/off/off_search_params.dart b/lib/src/data/off/off_search_params.dart
+index 832940e..aaae8cd 100644
+--- a/lib/src/data/off/off_search_params.dart
++++ b/lib/src/data/off/off_search_params.dart
+@@ -5,16 +5,20 @@ class OffSearchParams {
+   final String? categoryEn;
+   final String? brandEn;
+   final String? countryEn;
++
+   /// Comma-separated list of fields requested from the API.
+   final String fields;
++
+   /// If true, explicitly sort by product_name when querying (Smooth parity).
+   final bool preferNameSort;
++
+   /// Normalized tokens (client fallback) - computed in the UI, not sent to OFF.
+   final List<String> tokens;
+   final String? languageCode; // ISO 639-1, e.g. "en"
+   final String? countryCode; // ISO 3166-1 alpha-2, e.g. "in"
+   final int page;
+   final int pageSize;
++  final bool world;
+ 
+   const OffSearchParams({
+     this.query,
+@@ -28,6 +32,7 @@ class OffSearchParams {
+     this.countryCode,
+     this.page = 1,
+     this.pageSize = 20,
++    this.world = false,
+   });
+ 
+   Map<String, dynamic> toQueryMap() {
+@@ -62,15 +67,17 @@ class OffSearchParams {
+       map['lc'] = languageCode!.trim().toLowerCase();
+     }
+     // Priority: explicit country name > ISO code preference.
+-    if (countryEn != null && countryEn!.trim().isNotEmpty) {
+-      map['countries_tags_en'] = countryEn!.trim();
+-    } else if (countryCode != null && countryCode!.trim().isNotEmpty) {
+-      final cc = countryCode!.trim().toLowerCase();
+-      final match = kCountries.firstWhere(
+-        (e) => e.code.toLowerCase() == cc,
+-        orElse: () => CodeName(cc, cc),
+-      );
+-      map['countries_tags_en'] = match.name;
++    if (!world) {
++      if (countryEn != null && countryEn!.trim().isNotEmpty) {
++        map['countries_tags_en'] = countryEn!.trim();
++      } else if (countryCode != null && countryCode!.trim().isNotEmpty) {
++        final cc = countryCode!.trim().toLowerCase();
++        final match = kCountries.firstWhere(
++          (e) => e.code.toLowerCase() == cc,
++          orElse: () => CodeName(cc, cc),
++        );
++        map['countries_tags_en'] = match.name;
++      }
+     }
+     return map;
+   }
+diff --git a/lib/src/data/prefs/prefs_repository.dart b/lib/src/data/prefs/prefs_repository.dart
+index 3610a96..59b7ca7 100644
+--- a/lib/src/data/prefs/prefs_repository.dart
++++ b/lib/src/data/prefs/prefs_repository.dart
+@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
+ // ignore: depend_on_referenced_packages
+ import 'package:path/path.dart' as p;
+ import 'package:path_provider/path_provider.dart';
++import '../off/off_config.dart';
+ import 'user_prefs.dart';
+ 
+ class PrefsRepository {
+@@ -49,6 +50,7 @@ class PrefsController extends ChangeNotifier {
+     notifyListeners();
+     try {
+       _prefs = await _repo.load();
++      OffConfig.applyPrefs(_prefs);
+     } catch (e) {
+       _error = e.toString();
+     } finally {
+@@ -59,6 +61,7 @@ class PrefsController extends ChangeNotifier {
+ 
+   Future<void> update(UserPrefs next) async {
+     _prefs = next;
++    OffConfig.applyPrefs(_prefs);
+     notifyListeners();
+     await _repo.save(next);
+   }
+diff --git a/lib/src/features/search/presentation/search_result_tile.dart b/lib/src/features/search/presentation/search_result_tile.dart
+index ad85e62..85ce1f7 100644
+--- a/lib/src/features/search/presentation/search_result_tile.dart
++++ b/lib/src/features/search/presentation/search_result_tile.dart
+@@ -2,93 +2,166 @@ import 'package:flutter/material.dart';
+ import '../../../data/models/product.dart';
+ 
+ class SearchResultTile extends StatelessWidget {
+-  final Product product;
+-  final List<String> tokens;
+-  final VoidCallback onTap;
+-
+   const SearchResultTile({
+     super.key,
+     required this.product,
+-    required this.tokens,
+     required this.onTap,
+   });
+ 
+-  TextSpan _buildHighlightedSpan(String text, TextStyle? baseStyle) {
+-    if (text.isEmpty || tokens.isEmpty) {
+-      return TextSpan(text: text, style: baseStyle);
+-    }
+-    final lower = text.toLowerCase();
+-    final spans = <TextSpan>[];
+-    int index = 0;
+-    while (index < text.length) {
+-      int matchLength = 0;
+-      for (final token in tokens) {
+-        if (token.isEmpty) continue;
+-        if (lower.startsWith(token, index) && token.length > matchLength) {
+-          matchLength = token.length;
+-        }
+-      }
+-      if (matchLength == 0) {
+-        spans.add(TextSpan(text: text[index], style: baseStyle));
+-        index += 1;
+-      } else {
+-        spans.add(TextSpan(
+-          text: text.substring(index, index + matchLength),
+-          style: baseStyle?.copyWith(fontWeight: FontWeight.bold),
+-        ));
+-        index += matchLength;
+-      }
+-    }
+-    return TextSpan(children: spans);
+-  }
++  final Product product;
++  final VoidCallback onTap;
+ 
+   @override
+   Widget build(BuildContext context) {
+-    final theme = Theme.of(context);
+-    final nameStyle = theme.textTheme.bodyLarge;
+-    final brandStyle = theme.textTheme.bodyMedium;
+-    final name = product.name ?? 'Unnamed product';
+-    final brand = product.brand ?? '';
++    final ThemeData theme = Theme.of(context);
++    final String name = product.name?.trim().isNotEmpty == true
++        ? product.name!.trim()
++        : 'Unnamed product';
++    final String? brand =
++        product.brand?.trim().isNotEmpty == true ? product.brand!.trim() : null;
++    final String? quantity =
++        product.quantity?.trim().isNotEmpty == true ? product.quantity : null;
++    final String? grade = product.nutritionGrade?.trim().isNotEmpty == true
++        ? product.nutritionGrade!.trim().toUpperCase()
++        : null;
+ 
+-    return ListTile(
+-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+-      leading: _ResultThumbnail(url: product.imageUrl),
+-      title: RichText(
+-        text: _buildHighlightedSpan(name, nameStyle),
+-        maxLines: 2,
+-        overflow: TextOverflow.ellipsis,
++    return Card(
++      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
++      child: InkWell(
++        borderRadius: BorderRadius.circular(12),
++        onTap: onTap,
++        child: Padding(
++          padding: const EdgeInsets.all(12),
++          child: Row(
++            crossAxisAlignment: CrossAxisAlignment.start,
++            children: <Widget>[
++              _Thumbnail(url: product.imageUrl),
++              const SizedBox(width: 12),
++              Expanded(
++                child: Column(
++                  crossAxisAlignment: CrossAxisAlignment.start,
++                  children: <Widget>[
++                    Text(
++                      name,
++                      maxLines: 2,
++                      overflow: TextOverflow.ellipsis,
++                      style: theme.textTheme.titleMedium
++                          ?.copyWith(fontWeight: FontWeight.w600),
++                    ),
++                    if (brand != null || quantity != null) ...<Widget>[
++                      const SizedBox(height: 4),
++                      Wrap(
++                        spacing: 8,
++                        runSpacing: 4,
++                        children: <Widget>[
++                          if (brand != null)
++                            Text(
++                              brand,
++                              style: theme.textTheme.bodyMedium,
++                            ),
++                          if (quantity != null)
++                            Text(
++                              quantity,
++                              style: theme.textTheme.bodySmall
++                                  ?.copyWith(color: theme.hintColor),
++                            ),
++                        ],
++                      ),
++                    ],
++                    if (grade != null) ...<Widget>[
++                      const SizedBox(height: 8),
++                      Align(
++                        alignment: AlignmentDirectional.centerStart,
++                        child: _NutritionBadge(grade: grade),
++                      ),
++                    ],
++                  ],
++                ),
++              ),
++              const SizedBox(width: 8),
++              Icon(
++                Icons.chevron_right,
++                color: theme.colorScheme.onSurfaceVariant,
++              ),
++            ],
++          ),
++        ),
+       ),
+-      subtitle: brand.isEmpty
+-          ? null
+-          : RichText(
+-              text: _buildHighlightedSpan(brand, brandStyle),
+-              maxLines: 1,
+-              overflow: TextOverflow.ellipsis,
+-            ),
+-      onTap: onTap,
+-      trailing: const Icon(Icons.chevron_right),
+     );
+   }
+ }
+ 
+-class _ResultThumbnail extends StatelessWidget {
++class _Thumbnail extends StatelessWidget {
++  const _Thumbnail({required this.url});
++
+   final String? url;
+-  const _ResultThumbnail({required this.url});
+ 
+   @override
+   Widget build(BuildContext context) {
+-    const size = 52.0;
++    const double size = 64;
++    final BorderRadius radius = BorderRadius.circular(12);
+     if (url == null || url!.isEmpty) {
+-      final color = Theme.of(context).colorScheme.surfaceContainerHighest;
+-      return CircleAvatar(
+-        radius: size / 2,
+-        backgroundColor: color,
+-        child: const Icon(Icons.inventory_2, size: 24),
++      final Color color = Theme.of(context).colorScheme.surfaceContainerHighest;
++      return Container(
++        width: size,
++        height: size,
++        decoration: BoxDecoration(
++          color: color,
++          borderRadius: radius,
++        ),
++        child: const Icon(Icons.inventory_2, size: 26),
+       );
+     }
+     return ClipRRect(
+-      borderRadius: BorderRadius.circular(8),
+-      child: Image.network(url!, width: size, height: size, fit: BoxFit.cover),
++      borderRadius: radius,
++      child: Image.network(
++        url!,
++        width: size,
++        height: size,
++        fit: BoxFit.cover,
++      ),
++    );
++  }
++}
++
++class _NutritionBadge extends StatelessWidget {
++  const _NutritionBadge({required this.grade});
++
++  final String grade;
++
++  Color _backgroundColor(BuildContext context) {
++    switch (grade) {
++      case 'A':
++        return Colors.green.shade500;
++      case 'B':
++        return Colors.lightGreen.shade600;
++      case 'C':
++        return Colors.orange.shade600;
++      case 'D':
++        return Colors.deepOrange.shade700;
++      case 'E':
++        return Colors.red.shade700;
++      default:
++        return Theme.of(context).colorScheme.primary;
++    }
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final Color bg = _backgroundColor(context);
++    return Container(
++      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
++      decoration: BoxDecoration(
++        color: bg,
++        borderRadius: BorderRadius.circular(20),
++      ),
++      child: Text(
++        'Nutri-Score $grade',
++        style: Theme.of(context)
++            .textTheme
++            .labelMedium
++            ?.copyWith(color: Colors.white),
++      ),
+     );
+   }
+ }
+diff --git a/lib/src/features/search/presentation/search_screen.dart b/lib/src/features/search/presentation/search_screen.dart
+index ebd8f70..b6a73d0 100644
+--- a/lib/src/features/search/presentation/search_screen.dart
++++ b/lib/src/features/search/presentation/search_screen.dart
+@@ -1,14 +1,17 @@
+-import 'dart:async';
+ import 'package:flutter/material.dart';
++import 'package:flutter/services.dart';
+ import 'package:go_router/go_router.dart';
+ import 'package:provider/provider.dart';
+ import '../../../data/fooddb_repository.dart';
++import '../../../data/models/product.dart';
++import '../../../data/off/off_search_api.dart';
++import '../../../data/prefs/lookup_tables.dart';
+ import '../../../data/prefs/prefs_repository.dart';
++import '../../../data/prefs/user_prefs.dart';
+ import '../../../routing/app_router.dart';
+-import '../../../data/models/product.dart';
+ import '../../product/presentation/product_screen.dart';
++import '../data/search_history_store.dart';
+ import 'search_result_tile.dart';
+-import 'search_tokens.dart';
+ 
+ class SearchScreen extends StatefulWidget {
+   const SearchScreen({super.key});
+@@ -17,287 +20,536 @@ class SearchScreen extends StatefulWidget {
+   State<SearchScreen> createState() => _SearchScreenState();
+ }
+ 
++String? _countryNameForPrefs(UserPrefs prefs) {
++  final String? code = prefs.country?.trim();
++  if (code == null || code.isEmpty) {
++    return null;
++  }
++  final CodeName match = kCountries.firstWhere(
++    (CodeName entry) => entry.code.toLowerCase() == code.toLowerCase(),
++    orElse: () => CodeName(code, code.toUpperCase()),
++  );
++  return match.name;
++}
++
++class _ResultHeader extends StatelessWidget {
++  const _ResultHeader({
++    required this.loadedCount,
++    required this.totalCount,
++    required this.worldMode,
++    required this.countryName,
++    required this.onToggleWorld,
++  });
++
++  final int loadedCount;
++  final int totalCount;
++  final bool worldMode;
++  final String? countryName;
++  final Future<void> Function() onToggleWorld;
++
++  @override
++  Widget build(BuildContext context) {
++    final ThemeData theme = Theme.of(context);
++    final int displayCount = totalCount > 0 ? totalCount : loadedCount;
++    final String quantityLabel =
++        '$displayCount product${displayCount == 1 ? '' : 's'}';
++    final String subtitle = worldMode
++        ? 'Showing worldwide results'
++        : (countryName != null && countryName!.isNotEmpty)
++            ? 'Showing results for $countryName'
++            : 'Using your saved preferences';
++    final String? detail = totalCount > 0 && loadedCount < totalCount
++        ? 'Loaded $loadedCount of $totalCount'
++        : null;
++
++    return Card(
++      child: ListTile(
++        leading: const Icon(Icons.info_outline),
++        title: Text(
++          quantityLabel,
++          style: theme.textTheme.titleMedium
++              ?.copyWith(fontWeight: FontWeight.w600),
++        ),
++        subtitle: detail == null ? Text(subtitle) : Text('$subtitle\n$detail'),
++        isThreeLine: detail != null,
++        trailing: IconButton(
++          icon: Icon(worldMode ? Icons.public_off : Icons.public),
++          tooltip:
++              worldMode ? 'Back to local results' : 'See worldwide results',
++          onPressed: () {
++            onToggleWorld();
++          },
++        ),
++      ),
++    );
++  }
++}
++
+ class _SearchScreenState extends State<SearchScreen> {
+-  final _q = TextEditingController();
+-  final _scroll = ScrollController();
+-  Timer? _debounce;
+-  String _current = '';
+-  String? _category;
+-  String? _brand;
+-  String? _country;
++  static const int _pageSize = 20;
++
++  final TextEditingController _controller = TextEditingController();
++  final FocusNode _focusNode = FocusNode();
++  final ScrollController _resultsScroll = ScrollController();
++  final SearchHistoryStore _historyStore = SearchHistoryStore();
++
+   bool _loading = false;
+   bool _hasMore = false;
++  bool _worldMode = false;
+   int _page = 1;
+-  final int _pageSize = 20;
+-  final List<Product> _items = [];
+-  List<String> _tokens = const [];
++  int _totalCount = 0;
++  String? _activeQuery;
++  final List<Product> _items = <Product>[];
++  List<String> _history = const <String>[];
++  bool _historyLoading = true;
+ 
+   @override
+   void initState() {
+     super.initState();
+-    _scroll.addListener(_onScroll);
++    _resultsScroll.addListener(_onScroll);
++    _loadHistory();
+   }
+ 
+   @override
+   void dispose() {
+-    _debounce?.cancel();
+-    _q.dispose();
+-    _scroll.dispose();
++    _resultsScroll.removeListener(_onScroll);
++    _resultsScroll.dispose();
++    _controller.dispose();
++    _focusNode.dispose();
+     super.dispose();
+   }
+ 
+   void _onScroll() {
+-    if (!_hasMore || _loading) return;
+-    if (_scroll.position.pixels > _scroll.position.maxScrollExtent - 280) {
++    if (!_hasMore || _loading || _activeQuery == null) {
++      return;
++    }
++    if (_resultsScroll.position.pixels >
++        _resultsScroll.position.maxScrollExtent - 280) {
+       _fetchMore();
+     }
+   }
+ 
+-  void _onChanged(String v) {
+-    _debounce?.cancel();
+-    _debounce = Timer(const Duration(milliseconds: 450), () {
+-      _startSearch(v);
+-    });
+-  }
+-
+   bool _looksLikeBarcode(String raw) {
+-    final cleaned = raw.replaceAll(RegExp(r'\\s+'), '');
+-    if (cleaned.isEmpty || !RegExp(r'^\\d+$').hasMatch(cleaned)) return false;
+-    final len = cleaned.length;
++    final String cleaned = raw.replaceAll(RegExp(r'\s+'), '');
++    if (cleaned.isEmpty || !RegExp(r'^\d+$').hasMatch(cleaned)) {
++      return false;
++    }
++    final int len = cleaned.length;
+     return len == 8 || len == 12 || len == 13 || len == 14;
+   }
+ 
+-  Future<void> _handleSubmit(String raw) async {
+-    final cleaned = raw.replaceAll(RegExp(r'\\s+'), '');
++  Future<void> _performSearch(String raw) async {
++    final String trimmed = raw.trim();
++    if (trimmed.isEmpty) {
++      _resetSearch();
++      return;
++    }
++    final String cleaned = raw.replaceAll(RegExp(r'\s+'), '');
+     if (_looksLikeBarcode(cleaned)) {
+       if (!mounted) return;
+       await Navigator.of(context).push(
+-        MaterialPageRoute(builder: (_) => ProductScreen(barcode: cleaned)),
++        MaterialPageRoute<void>(
++          builder: (_) => ProductScreen(barcode: cleaned),
++        ),
+       );
+       return;
+     }
+-    _startSearch(raw);
++
++    setState(() {
++      _activeQuery = trimmed;
++      _page = 1;
++      _hasMore = false;
++      _loading = true;
++      _items.clear();
++      _worldMode = false;
++      _totalCount = 0;
++    });
++
++    final List<String> entries = await _historyStore.add(trimmed);
++    if (mounted) {
++      setState(() {
++        _history = entries;
++      });
++    }
++
++    await _fetchMore(reset: true);
+   }
+ 
+-  Map<String, String?> _parseTokens(String raw) {
+-    final parts = raw.split(RegExp(r'\\s+')).where((e) => e.isNotEmpty).toList();
+-    String? cat;
+-    String? brand;
+-    String? country;
+-    final leftovers = <String>[];
+-    for (final part in parts) {
+-      final lower = part.toLowerCase();
+-      if (lower.startsWith('cat:')) {
+-        cat = part.substring(4).trim();
+-      } else if (lower.startsWith('brand:')) {
+-        brand = part.substring(6).trim();
+-      } else if (lower.startsWith('country:')) {
+-        country = part.substring(8).trim();
++  Future<void> _fetchMore({bool reset = false}) async {
++    if (_loading && !reset) {
++      return;
++    }
++    final String? query = _activeQuery;
++    if (query == null || query.isEmpty) {
++      return;
++    }
++
++    if (!reset) {
++      setState(() => _loading = true);
++    }
++
++    final FoodDbRepository repo = context.read<FoodDbRepository>();
++    final UserPrefs prefs = context.read<PrefsController>().prefs;
++    final OffSearchResponse response = await repo.searchProducts(
++      query,
++      page: _page,
++      languageCode: prefs.language,
++      countryCode: prefs.country,
++      world: _worldMode,
++    );
++    if (!mounted) {
++      return;
++    }
++
++    final List<Product> newProducts = response.products;
++    setState(() {
++      _items.addAll(newProducts);
++      _totalCount = response.totalCount;
++      _page = response.page + 1;
++      if (response.totalCount == 0) {
++        _hasMore = newProducts.length >= _pageSize;
+       } else {
+-        leftovers.add(part);
++        _hasMore = _items.length < response.totalCount;
+       }
+-    }
+-    final q = leftovers.join(' ').trim();
+-    return {'q': q, 'cat': cat, 'brand': brand, 'country': country};
++      _loading = false;
++    });
+   }
+ 
+-  Future<void> _startSearch(String v) async {
+-    final raw = v.trim();
+-    if (raw.isEmpty) {
+-      setState(() {
+-        _current = '';
+-        _category = null;
+-        _brand = null;
+-        _country = null;
+-        _items.clear();
+-        _page = 1;
+-        _hasMore = false;
+-        _loading = false;
+-        _tokens = const [];
+-      });
++  void _resetSearch() {
++    setState(() {
++      _activeQuery = null;
++      _items.clear();
++      _page = 1;
++      _hasMore = false;
++      _loading = false;
++      _worldMode = false;
++      _totalCount = 0;
++    });
++    _loadHistory();
++  }
++
++  Future<void> _loadHistory() async {
++    setState(() => _historyLoading = true);
++    final List<String> entries = await _historyStore.load();
++    if (!mounted) return;
++    setState(() {
++      _history = entries;
++      _historyLoading = false;
++    });
++  }
++
++  Future<void> _removeHistoryEntry(String query) async {
++    final List<String> entries = await _historyStore.remove(query);
++    if (!mounted) return;
++    setState(() => _history = entries);
++  }
++
++  Future<void> _handleClipboardPaste() async {
++    final ClipboardData? data = await Clipboard.getData('text/plain');
++    final String text = data?.text?.trim() ?? '';
++    if (text.isEmpty) {
++      if (!mounted) return;
++      ScaffoldMessenger.of(context).showSnackBar(
++        const SnackBar(content: Text('Clipboard is empty')),
++      );
+       return;
+     }
+-    final parsed = _parseTokens(raw);
+-    final query = parsed['q']?.trim() ?? '';
+-    final cat = parsed['cat']?.trim();
+-    final brand = parsed['brand']?.trim();
+-    final country = parsed['country']?.trim();
+-    if (query.isEmpty && (cat == null || cat.isEmpty) && (brand == null || brand.isEmpty) && (country == null || country.isEmpty)) {
+-      setState(() {
+-        _current = '';
+-        _category = null;
+-        _brand = null;
+-        _country = null;
+-        _items.clear();
+-        _page = 1;
+-        _hasMore = false;
+-        _loading = false;
+-      });
++    _controller.text = text;
++    _controller.selection =
++        TextSelection.collapsed(offset: _controller.text.length);
++    await _performSearch(text);
++  }
++
++  void _editHistory(String query) {
++    _controller.text = query;
++    _controller.selection =
++        TextSelection.collapsed(offset: _controller.text.length);
++    _focusNode.requestFocus();
++  }
++
++  Future<void> _setWorldMode(bool value) async {
++    if (_activeQuery == null || _worldMode == value) {
+       return;
+     }
+     setState(() {
+-      _current = query;
+-      _category = cat?.isEmpty ?? true ? null : cat;
+-      _brand = brand?.isEmpty ?? true ? null : brand;
+-      _country = country?.isEmpty ?? true ? null : country;
+-      _items.clear();
++      _worldMode = value;
+       _page = 1;
++      _items.clear();
+       _hasMore = false;
+       _loading = true;
+-      _tokens = tokenize(query);
++      _totalCount = 0;
+     });
+     await _fetchMore(reset: true);
+   }
+ 
+-  Future<void> _fetchMore({bool reset = false}) async {
+-    if (_loading && !reset) return;
+-    if (!reset) {
+-      setState(() => _loading = true);
++  Future<void> _toggleWorldMode() => _setWorldMode(!_worldMode);
++
++  Future<void> _refreshResults() async {
++    if (_activeQuery == null) {
++      return;
+     }
+-    final repo = context.read<FoodDbRepository>();
+-    final prefs = context.read<PrefsController>().prefs;
+-    final list = await repo.searchProducts(
+-      _current,
+-      page: _page,
+-      categoryEn: _category,
+-      brandEn: _brand,
+-      countryEn: _country,
+-      languageCode: prefs.language,
+-      countryCode: prefs.country,
+-      tokens: _tokens,
+-    );
+-    if (!mounted) return;
+-    final tokens = _tokens;
+-    final filtered = tokens.isEmpty
+-        ? list
+-        : list
+-            .where((p) => containsAllTokens(
+-                  haystackName: p.name ?? '',
+-                  haystackBrand: p.brand ?? '',
+-                  tokens: tokens,
+-                ))
+-            .toList();
+     setState(() {
+-      _items.addAll(filtered);
+-      _page += 1;
+-      _hasMore = tokens.isEmpty && list.length >= _pageSize;
+-      _loading = false;
++      _page = 1;
++      _items.clear();
++      _hasMore = false;
++      _loading = true;
++      _totalCount = 0;
+     });
++    await _fetchMore(reset: true);
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
++    final UserPrefs prefs = context.watch<PrefsController>().prefs;
+     return Scaffold(
+       appBar: AppBar(title: const Text('Search')),
+       body: Column(
+-        children: [
++        children: <Widget>[
+           Padding(
+             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+             child: TextField(
+-              controller: _q,
++              controller: _controller,
++              focusNode: _focusNode,
+               decoration: InputDecoration(
+                 labelText: 'Search products',
+-                hintText: 'Try "cola", "cat:chocolates", "brand:nestle", or "country:India"',
++                hintText: 'Type a product name or barcode',
+                 prefixIcon: const Icon(Icons.search),
+-                suffixIcon: (_current.isNotEmpty || _q.text.isNotEmpty)
++                suffixIcon: _controller.text.isEmpty
+                     ? IconButton(
++                        tooltip: 'Search',
++                        icon: const Icon(Icons.arrow_forward),
++                        onPressed: () => _performSearch(_controller.text),
++                      )
++                    : IconButton(
+                         tooltip: 'Clear',
++                        icon: const Icon(Icons.close),
+                         onPressed: () {
+-                          _q.clear();
+-                          _startSearch('');
++                          _controller.clear();
++                          _resetSearch();
+                         },
+-                        icon: const Icon(Icons.clear),
+-                      )
+-                    : null,
++                      ),
+                 border: const OutlineInputBorder(),
+               ),
+               textInputAction: TextInputAction.search,
+-              onChanged: _onChanged,
+-              onSubmitted: (value) => _handleSubmit(value),
++              onSubmitted: _performSearch,
+             ),
+           ),
+-          Builder(
+-            builder: (context) {
+-              final prefs = context.watch<PrefsController>().prefs;
+-              final segments = <String>[];
+-              if (prefs.country != null && prefs.country!.trim().isNotEmpty) {
+-                segments.add('country=${prefs.country!.trim()}');
+-              }
+-              if (prefs.language != null && prefs.language!.trim().isNotEmpty) {
+-                segments.add('lc=${prefs.language!.trim()}');
+-              }
+-              final tokens = _tokens;
+-              if (segments.isEmpty && tokens.isEmpty) return const SizedBox.shrink();
+-              return Padding(
+-                padding: const EdgeInsets.symmetric(horizontal: 16),
+-                child: Align(
+-                  alignment: Alignment.centerLeft,
+-                  child: Column(
+-                    crossAxisAlignment: CrossAxisAlignment.start,
+-                    children: [
+-                      if (segments.isNotEmpty)
+-                        Text(
+-                          'Applied preferences: ${segments.join(', ')}',
+-                          style: Theme.of(context).textTheme.bodySmall,
+-                        ),
+-                      if (tokens.isNotEmpty)
+-                        Text(
+-                          'Keywords: ${tokens.join(' · ')}',
+-                          style: Theme.of(context).textTheme.bodySmall,
+-                        ),
+-                    ],
++          AnimatedSwitcher(
++            duration: const Duration(milliseconds: 250),
++            child: _activeQuery == null
++                ? const SizedBox.shrink()
++                : _ContextChips(
++                    worldMode: _worldMode,
++                    onWorldModeChanged: _setWorldMode,
++                    prefs: prefs,
+                   ),
+-                ),
+-              );
+-            },
+           ),
+           Expanded(
+-            child: _buildResults(context, _tokens),
++            child:
++                _activeQuery == null ? _buildHistory() : _buildResults(prefs),
+           ),
+         ],
+       ),
+     );
+   }
+ 
+-  Widget _buildResults(BuildContext context, List<String> tokens) {
+-    final hasQuery =
+-        _current.isNotEmpty || (_category != null) || (_brand != null) || (_country != null);
+-    if (!hasQuery) {
+-      return const Center(child: Text('Type to search'));
+-    }
+-    if (_items.isEmpty && _loading) {
++  Widget _buildHistory() {
++    if (_historyLoading) {
+       return const Center(child: CircularProgressIndicator());
+     }
+-    if (_items.isEmpty) {
+-      return const Center(child: Text('No results'));
+-    }
+-    return ListView.builder(
+-      controller: _scroll,
+-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+-      itemCount: _items.length + (_hasMore ? 1 : 0),
+-      itemBuilder: (context, index) {
+-        if (index >= _items.length) {
++    final bool hasHistory = _history.isNotEmpty;
++    final int itemCount = 1 + (hasHistory ? 1 + _history.length : 0);
++
++    return ListView.separated(
++      padding: const EdgeInsets.symmetric(vertical: 8),
++      itemCount: itemCount,
++      separatorBuilder: (_, __) => const Divider(height: 0),
++      itemBuilder: (BuildContext context, int index) {
++        if (index == 0) {
++          return ListTile(
++            leading: const Icon(Icons.paste),
++            title: const Text('Search with clipboard'),
++            onTap: _handleClipboardPaste,
++          );
++        }
++        if (!hasHistory) {
++          return const SizedBox.shrink();
++        }
++        if (index == 1) {
+           return Padding(
+-            padding: const EdgeInsets.symmetric(vertical: 16),
+-            child: _loading
+-                ? const Center(child: CircularProgressIndicator())
+-                : const SizedBox.shrink(),
++            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
++            child: Text(
++              'Recent searches',
++              style: Theme.of(context).textTheme.labelLarge,
++            ),
+           );
+         }
+-        final product = _items[index];
+-        return Column(
+-          children: [
+-            SearchResultTile(
+-              product: product,
+-              tokens: tokens,
+-              onTap: () => context.go(
+-                AppRoutes.product.replaceFirst(':barcode', product.barcode),
+-              ),
++        final String query = _history[index - 2];
++        return Dismissible(
++          key: Key(query),
++          direction: DismissDirection.endToStart,
++          onDismissed: (_) => _removeHistoryEntry(query),
++          background: Container(
++            color: Colors.redAccent,
++            alignment: AlignmentDirectional.centerEnd,
++            padding: const EdgeInsetsDirectional.only(end: 24),
++            child: const Icon(Icons.delete, color: Colors.white),
++          ),
++          child: ListTile(
++            leading: const Icon(Icons.history),
++            title: Text(query),
++            onTap: () => _performSearch(query),
++            trailing: IconButton(
++              icon: const Icon(Icons.edit, size: 20),
++              tooltip: 'Edit query',
++              onPressed: () => _editHistory(query),
+             ),
+-            const Divider(height: 0),
+-          ],
++          ),
+         );
+       },
+     );
+   }
++
++  Widget _buildResults(UserPrefs prefs) {
++    if (_items.isEmpty && _loading) {
++      return const Center(child: CircularProgressIndicator());
++    }
++    if (_items.isEmpty) {
++      final String headline =
++          'No results for "${_activeQuery ?? ''}" in your region.';
++      return Center(
++        child: Card(
++          margin: const EdgeInsets.all(24),
++          child: Padding(
++            padding: const EdgeInsets.all(20),
++            child: Column(
++              mainAxisSize: MainAxisSize.min,
++              crossAxisAlignment: CrossAxisAlignment.center,
++              children: <Widget>[
++                const Icon(Icons.search_off, size: 36),
++                const SizedBox(height: 12),
++                Text(
++                  headline,
++                  textAlign: TextAlign.center,
++                  style: Theme.of(context).textTheme.titleMedium,
++                ),
++                const SizedBox(height: 8),
++                Text(
++                  'Try a different keyword or broaden the scope.',
++                  textAlign: TextAlign.center,
++                ),
++                if (!_worldMode) ...<Widget>[
++                  const SizedBox(height: 16),
++                  FilledButton.tonalIcon(
++                    onPressed: _toggleWorldMode,
++                    icon: const Icon(Icons.public),
++                    label: const Text('Search worldwide instead'),
++                  ),
++                ],
++              ],
++            ),
++          ),
++        ),
++      );
++    }
++    return RefreshIndicator(
++      onRefresh: _refreshResults,
++      child: ListView.builder(
++        controller: _resultsScroll,
++        physics: const AlwaysScrollableScrollPhysics(),
++        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
++        itemCount: _items.length + (_hasMore ? 1 : 0) + 1,
++        itemBuilder: (BuildContext context, int index) {
++          if (index == 0) {
++            return Padding(
++              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
++              child: _ResultHeader(
++                loadedCount: _items.length,
++                totalCount: _totalCount,
++                worldMode: _worldMode,
++                countryName: _countryNameForPrefs(prefs),
++                onToggleWorld: _toggleWorldMode,
++              ),
++            );
++          }
++          final int resultIndex = index - 1;
++          if (resultIndex >= _items.length) {
++            return Padding(
++              padding: const EdgeInsets.symmetric(vertical: 16),
++              child: _loading
++                  ? const Center(child: CircularProgressIndicator())
++                  : const SizedBox.shrink(),
++            );
++          }
++          final Product product = _items[resultIndex];
++          return Column(
++            children: <Widget>[
++              SearchResultTile(
++                product: product,
++                onTap: () => context.go(
++                  AppRoutes.product.replaceFirst(':barcode', product.barcode),
++                ),
++              ),
++              const SizedBox(height: 6),
++            ],
++          );
++        },
++      ),
++    );
++  }
++}
++
++class _ContextChips extends StatelessWidget {
++  const _ContextChips({
++    required this.worldMode,
++    required this.onWorldModeChanged,
++    required this.prefs,
++  });
++
++  final bool worldMode;
++  final ValueChanged<bool> onWorldModeChanged;
++  final UserPrefs prefs;
++
++  @override
++  Widget build(BuildContext context) {
++    final String? country = _countryNameForPrefs(prefs);
++    final String? language = prefs.language?.toUpperCase();
++
++    return Padding(
++      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
++      child: Wrap(
++        spacing: 8,
++        runSpacing: 4,
++        crossAxisAlignment: WrapCrossAlignment.center,
++        children: <Widget>[
++          ChoiceChip(
++            label: const Text('Local'),
++            selected: !worldMode,
++            onSelected: (bool selected) {
++              if (selected) onWorldModeChanged(false);
++            },
++          ),
++          ChoiceChip(
++            label: const Text('Worldwide'),
++            selected: worldMode,
++            onSelected: (bool selected) {
++              if (selected) onWorldModeChanged(true);
++            },
++          ),
++          if (!worldMode && country != null)
++            InputChip(
++              avatar: const Icon(Icons.flag_outlined, size: 18),
++              label: Text(country),
++              onPressed: null,
++            ),
++          if (language != null && language.isNotEmpty)
++            InputChip(
++              avatar: const Icon(Icons.language, size: 18),
++              label: Text('Lang $language'),
++              onPressed: null,
++            ),
++        ],
++      ),
++    );
++  }
+ }
+diff --git a/lib/src/features/search/presentation/search_tokens.dart b/lib/src/features/search/presentation/search_tokens.dart
+deleted file mode 100644
+index e864870..0000000
+--- a/lib/src/features/search/presentation/search_tokens.dart
++++ /dev/null
+@@ -1,25 +0,0 @@
+-String _normalize(String value) => value.toLowerCase().trim();
+-
+-List<String> tokenize(String raw) {
+-  final normalized = _normalize(raw);
+-  if (normalized.isEmpty) return const <String>[];
+-  final parts = normalized.split(RegExp(r'\s+')).where((element) => element.isNotEmpty).toSet().toList();
+-  parts.sort();
+-  return parts;
+-}
+-
+-bool containsAllTokens({
+-  required String haystackName,
+-  required String haystackBrand,
+-  required List<String> tokens,
+-}) {
+-  if (tokens.isEmpty) return true;
+-  final name = _normalize(haystackName);
+-  final brand = _normalize(haystackBrand);
+-  for (final token in tokens) {
+-    if (!(name.contains(token) || brand.contains(token))) {
+-      return false;
+-    }
+-  }
+-  return true;
+-}

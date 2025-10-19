@@ -5,16 +5,20 @@ class OffSearchParams {
   final String? categoryEn;
   final String? brandEn;
   final String? countryEn;
+
   /// Comma-separated list of fields requested from the API.
   final String fields;
+
   /// If true, explicitly sort by product_name when querying (Smooth parity).
   final bool preferNameSort;
+
   /// Normalized tokens (client fallback) - computed in the UI, not sent to OFF.
   final List<String> tokens;
   final String? languageCode; // ISO 639-1, e.g. "en"
   final String? countryCode; // ISO 3166-1 alpha-2, e.g. "in"
   final int page;
   final int pageSize;
+  final bool world;
 
   const OffSearchParams({
     this.query,
@@ -28,6 +32,7 @@ class OffSearchParams {
     this.countryCode,
     this.page = 1,
     this.pageSize = 20,
+    this.world = false,
   });
 
   Map<String, dynamic> toQueryMap() {
@@ -62,15 +67,17 @@ class OffSearchParams {
       map['lc'] = languageCode!.trim().toLowerCase();
     }
     // Priority: explicit country name > ISO code preference.
-    if (countryEn != null && countryEn!.trim().isNotEmpty) {
-      map['countries_tags_en'] = countryEn!.trim();
-    } else if (countryCode != null && countryCode!.trim().isNotEmpty) {
-      final cc = countryCode!.trim().toLowerCase();
-      final match = kCountries.firstWhere(
-        (e) => e.code.toLowerCase() == cc,
-        orElse: () => CodeName(cc, cc),
-      );
-      map['countries_tags_en'] = match.name;
+    if (!world) {
+      if (countryEn != null && countryEn!.trim().isNotEmpty) {
+        map['countries_tags_en'] = countryEn!.trim();
+      } else if (countryCode != null && countryCode!.trim().isNotEmpty) {
+        final cc = countryCode!.trim().toLowerCase();
+        final match = kCountries.firstWhere(
+          (e) => e.code.toLowerCase() == cc,
+          orElse: () => CodeName(cc, cc),
+        );
+        map['countries_tags_en'] = match.name;
+      }
     }
     return map;
   }

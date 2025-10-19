@@ -4,6 +4,7 @@ import 'off/off_write_api.dart';
 import 'off/off_auth.dart';
 import 'off/off_search_api.dart';
 import 'off/off_search_params.dart';
+import '../core/env.dart';
 import 'models/product.dart';
 
 /// Repository that now uses the Open Food Facts REST API (read-only in this step).
@@ -22,32 +23,53 @@ class FoodDbRepository {
   }
 
   /// Search products (OFF v2). Page is 1-based.
-  Future<List<Product>> searchProducts(
+  Future<OffSearchResponse> searchProducts(
     String query, {
     int page = 1,
-    String? categoryEn,
-    String? brandEn,
-    String? countryEn,
     String? languageCode,
     String? countryCode,
-    List<String> tokens = const <String>[],
+    bool world = false,
   }) async {
     try {
+      final preferredLocale = Env.offPreferredLocale.toLowerCase();
+      final normalizedLanguage = languageCode?.trim().toLowerCase();
+      final fields = <String>{
+        'code',
+        'product_name',
+        'generic_name',
+        'brands',
+        'image_small_url',
+        'image_front_small_url',
+        'selected_images',
+      };
+      if (preferredLocale.isNotEmpty) {
+        fields
+          ..add('product_name_$preferredLocale')
+          ..add('generic_name_$preferredLocale');
+      }
+      if (normalizedLanguage != null && normalizedLanguage.isNotEmpty) {
+        fields
+          ..add('product_name_$normalizedLanguage')
+          ..add('generic_name_$normalizedLanguage');
+      }
       final params = OffSearchParams(
         query: query,
-        categoryEn: categoryEn,
-        brandEn: brandEn,
-        countryEn: countryEn,
         languageCode: languageCode,
         countryCode: countryCode,
-        tokens: tokens,
         preferNameSort: true,
         page: page,
         pageSize: 20,
+        fields: fields.join(','),
+        world: world,
       );
       return await _search.search(params: params);
     } catch (_) {
-      return <Product>[];
+      return const OffSearchResponse(
+        products: <Product>[],
+        totalCount: 0,
+        page: 1,
+        pageCount: 0,
+      );
     }
   }
 }
