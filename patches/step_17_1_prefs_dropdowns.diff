@@ -1,0 +1,381 @@
+--- /dev/null
++++ b/lib/src/data/prefs/lookup_tables.dart
+@@ -0,0 +1,201 @@
++class CodeName {
++  final String code;
++  final String name;
++  const CodeName(this.code, this.name);
++  @override
++  String toString() => '$name ($code)';
++}
++
++/// Curated list of commonly-used countries on OFF (ISO 3166-1 alpha-2).
++/// Keep small to avoid bloat; we can expand later if needed.
++const List<CodeName> kCountries = [
++  CodeName('in', 'India'),
++  CodeName('fr', 'France'),
++  CodeName('us', 'United States'),
++  CodeName('gb', 'United Kingdom'),
++  CodeName('de', 'Germany'),
++  CodeName('it', 'Italy'),
++  CodeName('es', 'Spain'),
++  CodeName('nl', 'Netherlands'),
++  CodeName('be', 'Belgium'),
++  CodeName('ch', 'Switzerland'),
++  CodeName('at', 'Austria'),
++  CodeName('pl', 'Poland'),
++  CodeName('pt', 'Portugal'),
++  CodeName('cz', 'Czechia'),
++  CodeName('hu', 'Hungary'),
++  CodeName('sk', 'Slovakia'),
++  CodeName('se', 'Sweden'),
++  CodeName('no', 'Norway'),
++  CodeName('dk', 'Denmark'),
++  CodeName('fi', 'Finland'),
++  CodeName('ru', 'Russia'),
++  CodeName('ua', 'Ukraine'),
++  CodeName('tr', 'Türkiye'),
++  CodeName('il', 'Israel'),
++  CodeName('sa', 'Saudi Arabia'),
++  CodeName('ae', 'United Arab Emirates'),
++  CodeName('cn', 'China'),
++  CodeName('jp', 'Japan'),
++  CodeName('kr', 'South Korea'),
++  CodeName('id', 'Indonesia'),
++  CodeName('my', 'Malaysia'),
++  CodeName('th', 'Thailand'),
++  CodeName('vn', 'Vietnam'),
++  CodeName('br', 'Brazil'),
++  CodeName('mx', 'Mexico'),
++  CodeName('ar', 'Argentina'),
++  CodeName('au', 'Australia'),
++  CodeName('nz', 'New Zealand'),
++  CodeName('za', 'South Africa'),
++];
++
++/// Common UI languages (ISO 639-1).
++const List<CodeName> kLanguages = [
++  CodeName('en', 'English'),
++  CodeName('fr', 'French'),
++  CodeName('de', 'German'),
++  CodeName('es', 'Spanish'),
++  CodeName('it', 'Italian'),
++  CodeName('nl', 'Dutch'),
++  CodeName('pt', 'Portuguese'),
++  CodeName('ru', 'Russian'),
++  CodeName('ar', 'Arabic'),
++  CodeName('hi', 'Hindi'),
++  CodeName('ta', 'Tamil'),
++  CodeName('te', 'Telugu'),
++  CodeName('ml', 'Malayalam'),
++  CodeName('bn', 'Bengali'),
++  CodeName('zh', 'Chinese'),
++  CodeName('ja', 'Japanese'),
++  CodeName('tr', 'Turkish'),
++  CodeName('pl', 'Polish'),
++  CodeName('sv', 'Swedish'),
++  CodeName('fi', 'Finnish'),
++  CodeName('no', 'Norwegian'),
++  CodeName('da', 'Danish'),
++  CodeName('cs', 'Czech'),
++  CodeName('el', 'Greek'),
++  CodeName('ro', 'Romanian'),
++  CodeName('hu', 'Hungarian'),
++  CodeName('he', 'Hebrew'),
++  CodeName('id', 'Indonesian'),
++  CodeName('ms', 'Malay'),
++  CodeName('th', 'Thai'),
++  CodeName('vi', 'Vietnamese'),
++  CodeName('uk', 'Ukrainian'),
++];
++
++/// Frequently used currencies (ISO 4217).
++const List<CodeName> kCurrencies = [
++  CodeName('INR', 'Indian Rupee'),
++  CodeName('EUR', 'Euro'),
++  CodeName('USD', 'US Dollar'),
++  CodeName('GBP', 'British Pound'),
++  CodeName('AUD', 'Australian Dollar'),
++  CodeName('CAD', 'Canadian Dollar'),
++  CodeName('CHF', 'Swiss Franc'),
++  CodeName('JPY', 'Japanese Yen'),
++  CodeName('CNY', 'Chinese Yuan'),
++  CodeName('KRW', 'South Korean Won'),
++  CodeName('BRL', 'Brazilian Real'),
++  CodeName('MXN', 'Mexican Peso'),
++  CodeName('ZAR', 'South African Rand'),
++  CodeName('SEK', 'Swedish Krona'),
++  CodeName('NOK', 'Norwegian Krone'),
++  CodeName('DKK', 'Danish Krone'),
++  CodeName('PLN', 'Polish Złoty'),
++  CodeName('CZK', 'Czech Koruna'),
++  CodeName('HUF', 'Hungarian Forint'),
++  CodeName('TRY', 'Turkish Lira'),
++  CodeName('SAR', 'Saudi Riyal'),
++  CodeName('AED', 'UAE Dirham'),
++  CodeName('ILS', 'Israeli New Shekel'),
++  CodeName('IDR', 'Indonesian Rupiah'),
++  CodeName('MYR', 'Malaysian Ringgit'),
++  CodeName('THB', 'Thai Baht'),
++  CodeName('VND', 'Vietnamese Dong'),
++  CodeName('NZD', 'New Zealand Dollar'),
++];
+--- a/lib/src/features/profile/presentation/preferences_screen.dart
++++ b/lib/src/features/profile/presentation/preferences_screen.dart
+@@ -1,18 +1,22 @@
+ import 'package:flutter/material.dart';
+ import 'package:provider/provider.dart';
+ import '../../../data/prefs/prefs_repository.dart';
+ import '../../../data/prefs/user_prefs.dart';
++import '../../../data/prefs/lookup_tables.dart';
+ 
+ class PreferencesScreen extends StatefulWidget {
+   const PreferencesScreen({super.key});
+ 
+   @override
+   State<PreferencesScreen> createState() => _PreferencesScreenState();
+ }
+ 
+ class _PreferencesScreenState extends State<PreferencesScreen> {
+   late PrefsController _ctrl;
+-  late TextEditingController _countryCtrl;
+-  late TextEditingController _langCtrl;
+-  late TextEditingController _currencyCtrl;
++  String? _countryCode;
++  String? _languageCode;
++  String? _currencyCode;
+   bool _haptics = true;
+   bool _scannerVibration = true;
+   bool _keepScreenOn = false;
+@@ -22,33 +26,28 @@
+   void initState() {
+     super.initState();
+     _ctrl = context.read<PrefsController>();
+-    _countryCtrl = TextEditingController();
+-    _langCtrl = TextEditingController();
+-    _currencyCtrl = TextEditingController();
+     _ctrl.addListener(_onChange);
+     _ctrl.load();
+   }
+ 
+   void _onChange() {
+     final p = _ctrl.prefs;
+-    _countryCtrl.text = p.country ?? '';
+-    _langCtrl.text = p.language ?? '';
+-    _currencyCtrl.text = p.currency ?? '';
++    _countryCode = p.country;
++    _languageCode = p.language;
++    _currencyCode = p.currency;
+     _haptics = p.haptics;
+     _scannerVibration = p.scannerVibration;
+     _keepScreenOn = p.keepScreenOn;
+     if (mounted) setState(() {});
+   }
+ 
+   @override
+   void dispose() {
+     _ctrl.removeListener(_onChange);
+-    _countryCtrl.dispose();
+-    _langCtrl.dispose();
+-    _currencyCtrl.dispose();
+     super.dispose();
+   }
+ 
+   Future<void> _save() async {
+     final next = _ctrl.prefs.copyWith(
+-      country: _countryCtrl.text.trim().isEmpty ? null : _countryCtrl.text.trim(),
+-      language: _langCtrl.text.trim().isEmpty ? null : _langCtrl.text.trim(),
+-      currency: _currencyCtrl.text.trim().isEmpty ? null : _currencyCtrl.text.trim(),
++      country: (_countryCode == null || _countryCode!.isEmpty) ? null : _countryCode,
++      language: (_languageCode == null || _languageCode!.isEmpty) ? null : _languageCode,
++      currency: (_currencyCode == null || _currencyCode!.isEmpty) ? null : _currencyCode,
+       haptics: _haptics,
+       scannerVibration: _scannerVibration,
+       keepScreenOn: _keepScreenOn,
+@@ -60,6 +59,85 @@
+     Navigator.of(context).maybePop();
+   }
+ 
++  Future<void> _pickFrom(
++    List<CodeName> source,
++    String title,
++    String? selected,
++    void Function(String?) onSelected,
++  ) async {
++    final ctrl = TextEditingController();
++    List<CodeName> filtered = List.of(source);
++    await showModalBottomSheet<void>(
++      context: context,
++      isScrollControlled: true,
++      showDragHandle: true,
++      builder: (ctx) {
++        return SafeArea(
++          child: Padding(
++            padding: EdgeInsets.only(
++              left: 16, right: 16, top: 8,
++              bottom: MediaQuery.of(ctx).padding.bottom + 16,
++            ),
++            child: Column(
++              mainAxisSize: MainAxisSize.min,
++              crossAxisAlignment: CrossAxisAlignment.start,
++              children: [
++                Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
++                const SizedBox(height: 8),
++                TextField(
++                  controller: ctrl,
++                  decoration: const InputDecoration(
++                    prefixIcon: Icon(Icons.search),
++                    hintText: 'Search…',
++                  ),
++                  onChanged: (q) {
++                    final qq = q.trim().toLowerCase();
++                    setState(() {
++                      filtered = source.where((e) =>
++                        e.name.toLowerCase().contains(qq) ||
++                        e.code.toLowerCase().contains(qq)
++                      ).toList();
++                    });
++                  },
++                ),
++                const SizedBox(height: 8),
++                Flexible(
++                  child: ListView.builder(
++                    shrinkWrap: true,
++                    itemCount: filtered.length,
++                    itemBuilder: (_, i) {
++                      final item = filtered[i];
++                      final isSel = selected != null && selected.toLowerCase() == item.code.toLowerCase();
++                      return ListTile(
++                        dense: true,
++                        title: Text(item.name),
++                        subtitle: Text(item.code),
++                        trailing: isSel ? const Icon(Icons.check) : null,
++                        onTap: () {
++                          onSelected(item.code);
++                          Navigator.of(ctx).pop();
++                        },
++                      );
++                    },
++                  ),
++                ),
++                const SizedBox(height: 8),
++                Row(
++                  children: [
++                    OutlinedButton.icon(
++                      onPressed: () { onSelected(null); Navigator.of(ctx).pop(); },
++                      icon: const Icon(Icons.clear),
++                      label: const Text('Clear'),
++                    ),
++                    const SizedBox(width: 12),
++                    TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Close')),
++                  ],
++                ),
++              ],
++            ),
++          ),
++        );
++      },
++    );
++  }
++
+   @override
+   Widget build(BuildContext context) {
+     final loading = context.watch<PrefsController>().loading;
+@@ -69,38 +147,54 @@
+       appBar: AppBar(title: const Text('Preferences')),
+       body: ListView(
+         padding: const EdgeInsets.all(16),
+         children: [
+           if (loading) const LinearProgressIndicator(),
+           const Text('General', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+           const SizedBox(height: 8),
+-          TextField(
+-            controller: _countryCtrl,
+-            decoration: const InputDecoration(
+-              labelText: 'Country code (e.g., in, fr)',
+-              helperText: 'Optional default for search & product fetch',
+-            ),
+-          ),
+-          const SizedBox(height: 12),
+-          TextField(
+-            controller: _langCtrl,
+-            decoration: const InputDecoration(
+-              labelText: 'Language code (e.g., en)',
+-              helperText: 'Optional preference for texts',
+-            ),
+-          ),
+-          const SizedBox(height: 12),
+-          TextField(
+-            controller: _currencyCtrl,
+-            decoration: const InputDecoration(
+-              labelText: 'Currency (e.g., INR, EUR)',
+-              helperText: 'Optional currency for prices',
+-            ),
+-          ),
++          Card(
++            child: Column(
++              children: [
++                ListTile(
++                  title: const Text('Country'),
++                  subtitle: Text(
++                    _countryCode == null
++                      ? 'Not set'
++                      : '${kCountries.firstWhere((e) => e.code == _countryCode, orElse: () => CodeName(_countryCode!, _countryCode!)).name} ($_countryCode)',
++                  ),
++                  trailing: FilledButton(
++                    onPressed: () => _pickFrom(kCountries, 'Select country', _countryCode, (c) => setState(() => _countryCode = c)),
++                    child: const Text('Select'),
++                  ),
++                ),
++                const Divider(height: 0),
++                ListTile(
++                  title: const Text('Language'),
++                  subtitle: Text(
++                    _languageCode == null
++                      ? 'Not set'
++                      : '${kLanguages.firstWhere((e) => e.code == _languageCode, orElse: () => CodeName(_languageCode!, _languageCode!)).name} ($_languageCode)',
++                  ),
++                  trailing: FilledButton(
++                    onPressed: () => _pickFrom(kLanguages, 'Select language', _languageCode, (c) => setState(() => _languageCode = c)),
++                    child: const Text('Select'),
++                  ),
++                ),
++                const Divider(height: 0),
++                ListTile(
++                  title: const Text('Currency'),
++                  subtitle: Text(
++                    _currencyCode == null
++                      ? 'Not set'
++                      : '${kCurrencies.firstWhere((e) => e.code == _currencyCode, orElse: () => CodeName(_currencyCode!, _currencyCode!)).name} ($_currencyCode)',
++                  ),
++                  trailing: FilledButton(
++                    onPressed: () => _pickFrom(kCurrencies, 'Select currency', _currencyCode, (c) => setState(() => _currencyCode = c)),
++                    child: const Text('Select'),
++                  ),
++                ),
++              ],
++            ),
++          ),
+           const SizedBox(height: 20),
+           const Text('Interaction', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+           SwitchListTile(
+             value: _haptics,
+             onChanged: (v) => setState(() => _haptics = v),
+             title: const Text('Haptics'),
+             subtitle: const Text('Vibration and gentle feedback where supported'),
+           ),
+@@ -120,7 +214,7 @@
+             title: const Text('Keep screen on while scanning'),
+           ),
+           const SizedBox(height: 12),
+           FilledButton(
+-            onPressed: loading ? null : _save,
+-            child: Text(loading ? 'Saving…' : 'Save'),
++            onPressed: loading ? null : _save,
++            child: Text(loading ? 'Saving…' : 'Save'),
+           ),
+         ],
+       ),
+     );
+   }
+ }
