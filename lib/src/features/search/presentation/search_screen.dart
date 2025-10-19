@@ -18,9 +18,12 @@ class _SearchScreenState extends State<SearchScreen> {
   final _scroll = ScrollController();
   Timer? _debounce;
   String _current = '';
+  String? _category;
+  String? _brand;
   bool _loading = false;
   bool _hasMore = false;
   int _page = 1;
+  final int _pageSize = 20;
   final List<Product> _items = [];
 
   @override
@@ -51,31 +54,91 @@ class _SearchScreenState extends State<SearchScreen> {
     });
   }
 
+  bool _looksLikeBarcode(String s) => RegExp(r'^\\d{8,14}$').hasMatch(s);
+
+  Map<String, String?> _parseTokens(String raw) {
+    final parts = raw.split(RegExp(r'\\s+')).where((e) => e.isNotEmpty).toList();
+    String? cat;
+    String? brand;
+    final leftovers = <String>[];
+    for (final part in parts) {
+      final lower = part.toLowerCase();
+      if (lower.startsWith('cat:')) {
+        cat = part.substring(4).trim();
+      } else if (lower.startsWith('brand:')) {
+        brand = part.substring(6).trim();
+      } else {
+        leftovers.add(part);
+      }
+    }
+    final q = leftovers.join(' ').trim();
+    return {'q': q, 'cat': cat, 'brand': brand};
+  }
+
   Future<void> _startSearch(String v) async {
-    final query = v.trim();
+    final raw = v.trim();
+    if (raw.isEmpty) {
+      setState(() {
+        _current = '';
+        _category = null;
+        _brand = null;
+        _items.clear();
+        _page = 1;
+        _hasMore = false;
+        _loading = false;
+      });
+      return;
+    }
+    if (_looksLikeBarcode(raw)) {
+      if (!mounted) return;
+      context.go(AppRoutes.product.replaceFirst(':barcode', raw));
+      return;
+    }
+    final parsed = _parseTokens(raw);
+    final query = parsed['q']?.trim() ?? '';
+    final cat = parsed['cat']?.trim();
+    final brand = parsed['brand']?.trim();
+    if (query.isEmpty && (cat == null || cat.isEmpty) && (brand == null || brand.isEmpty)) {
+      setState(() {
+        _current = '';
+        _category = null;
+        _brand = null;
+        _items.clear();
+        _page = 1;
+        _hasMore = false;
+        _loading = false;
+      });
+      return;
+    }
     setState(() {
       _current = query;
+      _category = cat?.isEmpty ?? true ? null : cat;
+      _brand = brand?.isEmpty ?? true ? null : brand;
       _items.clear();
       _page = 1;
       _hasMore = false;
+      _loading = true;
     });
-    if (query.length < 2) {
-      setState(() => _loading = false);
-      return;
-    }
-    await _fetchMore();
+    await _fetchMore(reset: true);
   }
 
-  Future<void> _fetchMore() async {
-    if (_loading) return;
-    setState(() => _loading = true);
+  Future<void> _fetchMore({bool reset = false}) async {
+    if (_loading && !reset) return;
+    if (!reset) {
+      setState(() => _loading = true);
+    }
     final repo = context.read<FoodDbRepository>();
-    final list = await repo.searchProducts(_current, page: _page);
+    final list = await repo.searchProducts(
+      _current,
+      page: _page,
+      categoryEn: _category,
+      brandEn: _brand,
+    );
     if (!mounted) return;
     setState(() {
       _items.addAll(list);
       _page += 1;
-      _hasMore = list.length >= 20;
+      _hasMore = list.length >= _pageSize;
       _loading = false;
     });
   }
@@ -92,7 +155,7 @@ class _SearchScreenState extends State<SearchScreen> {
               controller: _q,
               decoration: InputDecoration(
                 labelText: 'Search products',
-                hintText: 'Type a name, brand, etc.',
+                hintText: 'Try "cola", "cat:chocolates", or "brand:nestle"',
                 prefixIcon: const Icon(Icons.search),
                 suffixIcon: (_current.isNotEmpty || _q.text.isNotEmpty)
                     ? IconButton(
@@ -120,7 +183,9 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _buildResults(BuildContext context) {
-    if (_current.isEmpty) {
+    final hasQuery =
+        _current.isNotEmpty || (_category != null) || (_brand != null);
+    if (!hasQuery) {
       return const Center(child: Text('Type to search'));
     }
     if (_items.isEmpty && _loading) {

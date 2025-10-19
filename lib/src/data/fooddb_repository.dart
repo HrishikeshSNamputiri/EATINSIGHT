@@ -21,9 +21,20 @@ class FoodDbRepository {
   }
 
   /// Search products (OFF v2). Page is 1-based.
-  Future<List<Product>> searchProducts(String query, {int page = 1}) async {
+  Future<List<Product>> searchProducts(
+    String query, {
+    int page = 1,
+    String? categoryEn,
+    String? brandEn,
+  }) async {
     try {
-      return await _search.search(query: query, page: page, pageSize: 20);
+      return await _search.search(
+        query: query,
+        page: page,
+        pageSize: 20,
+        categoryEn: categoryEn,
+        brandEn: brandEn,
+      );
     } catch (_) {
       return <Product>[];
     }

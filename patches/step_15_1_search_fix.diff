@@ -1,0 +1,229 @@
+--- a/lib/src/data/off/off_api.dart
++++ b/lib/src/data/off/off_api.dart
+@@ -1,6 +1,7 @@
+ import 'package:dio/dio.dart';
+ import '../../core/env.dart';
+ import '../models/product.dart';
++import 'dart:convert';
+ 
+ class OffApi {
+   final Dio _dio;
+@@
+   Future<Product?> getProduct(String barcode) async {
+@@
+ }
+ 
+ extension<T> on Iterable<T> {
+   T? get firstOrNull => isEmpty ? null : first;
+ }
+ 
+-class OffSearchResult {
++class OffSearchResult {
+   final List<Product> products;
+   final int total;
+   final int page;
+   final int pageSize;
+   OffSearchResult(this.products, this.total, this.page, this.pageSize);
+ }
+ 
+-extension OffApiSearch on OffApi {
++extension OffApiSearch on OffApi {
+   /// OFF Search v2: https://world.openfoodfacts.org/api/v2/search
+-  Future<OffSearchResult> search({
+-    required String query,
+-    int page = 1,
+-    int pageSize = 20,
+-  }) async {
++  Future<OffSearchResult> search({
++    required String query,
++    int page = 1,
++    int pageSize = 20,
++    String? categoryEn,
++    String? brandEn,
++  }) async {
+     final q = query.trim();
+-    if (q.isEmpty) return OffSearchResult(const [], 0, page, pageSize);
+-    final params = {
+-      'search_terms': q,
+-      'page': '$page',
+-      'page_size': '$pageSize',
+-      'fields': [
++    if (q.isEmpty && categoryEn == null && brandEn == null) {
++      return OffSearchResult(const [], 0, page, pageSize);
++    }
++    final params = <String, String>{
++      // Free-text: ensure server honors query; duplicate key for compatibility.
++      if (q.isNotEmpty) 'search_terms': q,
++      if (q.isNotEmpty) 'search': q,
++      // Deterministic results & fresh cache
++      'sort_by': 'product_name',
++      'nocache': '1',
++      // Pagination
++      'page': '$page',
++      'page_size': '$pageSize',
++      // Optional tag filters
++      if (categoryEn != null && categoryEn.trim().isNotEmpty)
++        'categories_tags_en': categoryEn.trim(),
++      if (brandEn != null && brandEn.trim().isNotEmpty)
++        'brands_tags_en': brandEn.trim(),
++      // Projection
++      'fields': [
+         'code',
+         'product_name',
+         'product_name_${Env.offPreferredLocale}',
+         'brands',
+         'image_front_url',
+         'quantity',
+         'nutrition_grades',
+         'ingredients_text',
+         'ingredients_text_${Env.offPreferredLocale}',
+         'nutriments',
+         'allergens_tags',
+         'additives_tags',
+         'labels_tags',
+-      ].join(','),
+-    };
++      ].join(','),
++    };
+     final res = await _dio.get('/api/v2/search', queryParameters: params);
+     if (res.statusCode != 200 || res.data is! Map) {
+       return OffSearchResult(const [], 0, page, pageSize);
+     }
+     final map = res.data as Map;
+@@
+     return OffSearchResult(list, total, page, pageSize);
+   }
+ }
+--- a/lib/src/data/fooddb_repository.dart
++++ b/lib/src/data/fooddb_repository.dart
+@@
+ class FoodDbRepository {
+   final OffApi _api = OffApi();
+@@
+ }
+ 
+ class SearchPage {
+   final List<Product> products;
+   final int total;
+   final int page;
+   final int pageSize;
+   SearchPage(this.products, this.total, this.page, this.pageSize);
+ }
+ 
+ extension FoodDbRepositorySearch on FoodDbRepository {
+-  Future<SearchPage> search(String query, {int page = 1, int pageSize = 20}) async {
+-    final res = await _api.search(query: query, page: page, pageSize: pageSize);
++  Future<SearchPage> search(
++    String query, {
++    int page = 1,
++    int pageSize = 20,
++    String? categoryEn,
++    String? brandEn,
++  }) async {
++    final res = await _api.search(
++      query: query,
++      page: page,
++      pageSize: pageSize,
++      categoryEn: categoryEn,
++      brandEn: brandEn,
++    );
+     return SearchPage(res.products, res.total, res.page, res.pageSize);
+   }
+ }
+--- a/lib/src/features/search/presentation/search_screen.dart
++++ b/lib/src/features/search/presentation/search_screen.dart
+@@
+ class _SearchScreenState extends State<SearchScreen> {
+   final _ctrl = TextEditingController();
+   final _scroll = ScrollController();
+   bool _busy = false;
+   String _lastQuery = '';
++  String? _lastCategory;
++  String? _lastBrand;
+@@
+-  Future<void> _submit([String? initial]) async {
+-    final q = (initial ?? _ctrl.text).trim();
++  bool _looksLikeBarcode(String s) => RegExp(r'^\d{8,14}$').hasMatch(s);
++
++  Map<String, String?> _parseTokens(String raw) {
++    // Supports: cat:<name>, brand:<name>
++    final parts = raw.split(RegExp(r'\s+')).toList();
++    String? cat;
++    String? brand;
++    final leftovers = <String>[];
++    for (final p in parts) {
++      if (p.toLowerCase().startsWith('cat:')) {
++        cat = p.substring(4).trim();
++      } else if (p.toLowerCase().startsWith('brand:')) {
++        brand = p.substring(6).trim();
++      } else if (p.isNotEmpty) {
++        leftovers.add(p);
++      }
++    }
++    final q = leftovers.join(' ').trim();
++    return {'q': q.isEmpty ? '' : q, 'cat': cat, 'brand': brand};
++  }
++
++  Future<void> _submit([String? initial]) async {
++    final raw = (initial ?? _ctrl.text).trim();
++    if (raw.isEmpty) return;
++    // Direct barcode jump
++    if (_looksLikeBarcode(raw)) {
++      if (!mounted) return;
++      context.go('/product/$raw');
++      return;
++    }
++    final tokens = _parseTokens(raw);
++    final q = tokens['q'] ?? '';
++    final cat = tokens['cat'];
++    final brand = tokens['brand'];
+     if (q.isEmpty) return;
+     setState(() {
+       _busy = true;
+-      _lastQuery = q;
++      _lastQuery = q;
++      _lastCategory = cat;
++      _lastBrand = brand;
+       _items.clear();
+       _page = 1;
+       _total = 0;
+       _hasMore = false;
+     });
+     final repo = context.read<FoodDbRepository>();
+-    final res = await repo.search(q, page: 1, pageSize: _pageSize);
++    final res = await repo.search(
++      q,
++      page: 1,
++      pageSize: _pageSize,
++      categoryEn: cat,
++      brandEn: brand,
++    );
+@@
+   Future<void> _loadMore() async {
+@@
+-    final res = await repo.search(_lastQuery, page: next, pageSize: _pageSize);
++    final res = await repo.search(
++      _lastQuery,
++      page: next,
++      pageSize: _pageSize,
++      categoryEn: _lastCategory,
++      brandEn: _lastBrand,
++    );
+@@
+       child: Column(
+@@
+-            child: TextField(
++            child: TextField(
+               controller: _ctrl,
+               textInputAction: TextInputAction.search,
+               onSubmitted: (_) => _submit(),
+               decoration: const InputDecoration(
+-                labelText: 'Search products',
+-                hintText: 'e.g., cola, chocolate, chips',
++                labelText: 'Search products',
++                hintText: 'e.g., cola  •  cat:chocolates  •  brand:nestle',
+                 prefixIcon: Icon(Icons.search),
+                 border: OutlineInputBorder(borderRadius: All(Radius.circular(12))),
+               ),
+             ),
+``` 

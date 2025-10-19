@@ -24,19 +24,30 @@ class OffSearchApi {
     required String query,
     int page = 1,
     int pageSize = 20,
+    String? categoryEn,
+    String? brandEn,
   }) async {
     final q = query.trim();
-    if (q.isEmpty || q.length < 2) return <Product>[];
+    final hasFilters = (categoryEn != null && categoryEn.trim().isNotEmpty) ||
+        (brandEn != null && brandEn.trim().isNotEmpty);
+    if (q.isEmpty && !hasFilters) return <Product>[];
+    final params = <String, String>{
+      if (q.isNotEmpty) 'search_terms': q,
+      if (q.isNotEmpty) 'search': q,
+      'sort_by': 'product_name',
+      'nocache': '1',
+      'page': '$page',
+      'page_size': '$pageSize',
+      if (categoryEn != null && categoryEn.trim().isNotEmpty)
+        'categories_tags_en': categoryEn.trim(),
+      if (brandEn != null && brandEn.trim().isNotEmpty)
+        'brands_tags_en': brandEn.trim(),
+      'fields':
+          'code,product_name,product_name_${Env.offPreferredLocale},brands,image_front_url',
+    };
     final resp = await _dio.get(
       '/api/v2/search',
-      queryParameters: {
-        'search_terms': q,
-        'fields':
-            'code,product_name,product_name_${Env.offPreferredLocale},brands,image_front_url',
-        'page': page,
-        'page_size': pageSize,
-        'sort_by': 'unique_scans_n', // reasonable default
-      },
+      queryParameters: params,
     );
     if (resp.statusCode != 200) return <Product>[];
     final body = resp.data;
