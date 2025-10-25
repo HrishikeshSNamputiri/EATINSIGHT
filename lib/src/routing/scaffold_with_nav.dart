@@ -11,7 +11,6 @@ class ScaffoldWithNavBar extends StatelessWidget {
     _Dest('Scan', AppRoutes.scan, Icons.qr_code_scanner),
     _Dest('Search', AppRoutes.search, Icons.search),
     _Dest('Prices', AppRoutes.prices, Icons.currency_rupee),
-    _Dest('Lists', AppRoutes.lists, Icons.list),
     _Dest('Profile', AppRoutes.profile, Icons.person),
   ];
 

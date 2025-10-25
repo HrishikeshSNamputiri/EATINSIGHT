@@ -1,0 +1,164 @@
+--- a/lib/src/routing/app_router.dart
++++ b/lib/src/routing/app_router.dart
+@@ -1,14 +1,12 @@
+ import 'package:flutter/material.dart';
+ import 'package:go_router/go_router.dart';
+ import '../features/scan/presentation/scan_screen.dart';
+-import '../features/search/presentation/search_screen.dart';
++import '../features/search/presentation/search_screen.dart';
+ import '../features/prices/presentation/prices_screen.dart';
+-import '../features/lists/presentation/lists_screen.dart';
+ import '../features/profile/presentation/profile_screen.dart';
+ import '../features/profile/presentation/preferences_screen.dart';
+ import 'scaffold_with_nav.dart';
+ 
+ class AppRoutes {
+   static const home = '/';
+   static const prefs = '/prefs';
+   static const scan = '/scan';
+-  static const lists = '/lists';
+   static const search = '/search';
+   static const prices = '/prices';
+   static const profile = '/profile';
+@@ -23,9 +21,8 @@ GoRouter createRouter() {
+       routes: [
+         GoRoute(path: AppRoutes.scan, builder: (_, __) => const ScanScreen()),
+-        GoRoute(path: AppRoutes.lists, builder: (_, __) => const ListsScreen()),
+         GoRoute(path: AppRoutes.search, builder: (_, __) => const SearchScreen()),
+         GoRoute(path: AppRoutes.prices, builder: (_, __) => const PricesScreen()),
+         GoRoute(path: AppRoutes.prefs, builder: (_, __) => const PreferencesScreen()),
+         GoRoute(path: AppRoutes.profile, builder: (_, __) => const ProfileScreen()),
+       ],
+     ),
+   );
+ }
+--- a/lib/src/routing/scaffold_with_nav.dart
++++ b/lib/src/routing/scaffold_with_nav.dart
+@@ -1,12 +1,10 @@
+ import 'package:flutter/material.dart';
+ import 'package:go_router/go_router.dart';
+ import 'app_router.dart';
+ 
+ class ScaffoldWithNav extends StatefulWidget {
+   const ScaffoldWithNav({super.key, required this.child});
+   final Widget child;
+   @override
+   State<ScaffoldWithNav> createState() => _ScaffoldWithNavState();
+ }
+ 
+ class _ScaffoldWithNavState extends State<ScaffoldWithNav> {
+   int _index = 0;
+@@ -20,19 +18,16 @@ class _ScaffoldWithNavState extends State<ScaffoldWithNav> {
+     switch (location) {
+       case AppRoutes.scan: return 1;
+-      case AppRoutes.search: return 2;
+-      case AppRoutes.prices: return 3;
+-      case AppRoutes.profile: return 5;
+-      case AppRoutes.lists: return 4;
++      case AppRoutes.search: return 2;
++      case AppRoutes.prices: return 3;
++      case AppRoutes.profile: return 4;
+       default: return 0; // home
+     }
+   }
+ 
+   void _onTap(int i) {
+     setState(() => _index = i);
+     switch (i) {
+       case 0: context.go(AppRoutes.home); break;
+       case 1: context.go(AppRoutes.scan); break;
+       case 2: context.go(AppRoutes.search); break;
+-      case 3: context.go(AppRoutes.prices); break;
+-      case 4: context.go(AppRoutes.lists); break;
+-      case 5: context.go(AppRoutes.profile); break;
++      case 3: context.go(AppRoutes.prices); break;
++      case 4: context.go(AppRoutes.profile); break;
+     }
+   }
+ 
+@@ -43,17 +38,15 @@ class _ScaffoldWithNavState extends State<ScaffoldWithNav> {
+       body: widget.child,
+       bottomNavigationBar: NavigationBar(
+         selectedIndex: _index,
+         onDestinationSelected: _onTap,
+         destinations: const [
+           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home), label: 'Home'),
+           NavigationDestination(icon: Icon(Icons.qr_code_scanner), selectedIcon: Icon(Icons.qr_code), label: 'Scan'),
+           NavigationDestination(icon: Icon(Icons.search_outlined), selectedIcon: Icon(Icons.search), label: 'Search'),
+           NavigationDestination(icon: Icon(Icons.sell_outlined), selectedIcon: Icon(Icons.sell), label: 'Prices'),
+-          NavigationDestination(icon: Icon(Icons.format_list_bulleted), selectedIcon: Icon(Icons.format_list_bulleted), label: 'Lists'),
+           NavigationDestination(icon: Icon(Icons.person_outline), selectedIcon: Icon(Icons.person), label: 'Profile'),
+         ],
+       ),
+-      drawer: _AppDrawer(onSelect: _onTap, currentIndex: _index),
++      drawer: _AppDrawer(onSelect: _onTap, currentIndex: _index),
+     );
+   }
+ }
+@@ -70,19 +63,18 @@ class _AppDrawer extends StatelessWidget {
+   @override
+   Widget build(BuildContext context) {
+     return Drawer(
+       child: SafeArea(
+         child: ListView(
+           children: [
+             const DrawerHeader(child: Text('EATINSIGHT')),
+             ListTile(leading: const Icon(Icons.home), title: const Text('Home'), onTap: () => onSelect(0)),
+             ListTile(leading: const Icon(Icons.qr_code), title: const Text('Scan'), onTap: () => onSelect(1)),
+             ListTile(leading: const Icon(Icons.search), title: const Text('Search'), onTap: () => onSelect(2)),
+             ListTile(leading: const Icon(Icons.sell), title: const Text('Prices'), onTap: () => onSelect(3)),
+-            ListTile(leading: const Icon(Icons.format_list_bulleted), title: const Text('Lists'), onTap: () => onSelect(4)),
+-            ListTile(leading: const Icon(Icons.person), title: const Text('Profile'), onTap: () => onSelect(5)),
++            ListTile(leading: const Icon(Icons.person), title: const Text('Profile'), onTap: () => onSelect(4)),
+           ],
+         ),
+       ),
+     );
+   }
+ }
+--- a/lib/src/features/profile/presentation/profile_screen.dart
++++ b/lib/src/features/profile/presentation/profile_screen.dart
+@@ -1,6 +1,7 @@
+ import 'package:flutter/material.dart';
+ import 'package:provider/provider.dart';
+ import '../../../data/prefs/prefs_repository.dart';
++// (Step 21) Removed dev shortcut "Open by Barcode"
+ 
+ class ProfileScreen extends StatelessWidget {
+   const ProfileScreen({super.key});
+@@ -20,25 +21,16 @@ class ProfileScreen extends StatelessWidget {
+     return Scaffold(
+       appBar: AppBar(title: const Text('Profile')),
+       body: ListView(
+         padding: const EdgeInsets.all(16),
+         children: [
+           ListTile(
+             title: const Text('Preferences'),
+             subtitle: const Text('Country, language, haptics'),
+             leading: const Icon(Icons.settings),
+             onTap: () => Navigator.of(context).pushNamed('/prefs'),
+           ),
+-          const Divider(),
+-          // Dev shortcuts
+-          Padding(
+-            padding: const EdgeInsets.only(top: 8, bottom: 4),
+-            child: Text('Developer', style: Theme.of(context).textTheme.titleSmall),
+-          ),
+-          ListTile(
+-            title: const Text('(Dev) Open by Barcode'),
+-            subtitle: const Text('Jump to a product by raw barcode'),
+-            leading: const Icon(Icons.numbers),
+-            onTap: () async {
+-              // removed in Step 21
+-            },
+-          ),
++          // (Step 21) Developer shortcuts removed
+         ],
+       ),
+     );
+   }
+ }
+--- a/lib/src/features/lists/presentation/lists_screen.dart
++++ /dev/null
+@@ -1,40 +0,0 @@
+-(removed file)
