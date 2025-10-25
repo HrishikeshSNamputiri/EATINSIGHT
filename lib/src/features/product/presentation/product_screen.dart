@@ -6,6 +6,7 @@ import '../../../data/fooddb_repository.dart';
 import '../../../data/models/product.dart';
 import '../../../routing/app_router.dart';
 import '../../../data/off/off_auth.dart';
+import '../../../data/lists/lists_controller.dart';
 import 'add_photo_sheet.dart';
 import 'edit_product_sheet.dart';
 import 'robotoff_questions_sheet.dart';
@@ -52,11 +53,39 @@ class _ProductScreenState extends State<ProductScreen> {
   @override
   Widget build(BuildContext context) {
     final loggedIn = context.watch<OffAuth>().isLoggedIn;
+    final lists = context.watch<ListsController>();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Product'),
         actions: [
           IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
+          if (lists.active != null)
+            IconButton(
+              tooltip: 'Add to list',
+              icon: const Icon(Icons.playlist_add),
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final listsController = context.read<ListsController>();
+                final product = _latestProduct ?? await _future;
+                if (!mounted) return;
+                if (product == null) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Load the product first')),
+                  );
+                  return;
+                }
+                final bool ok =
+                    await listsController.addBarcode(product.barcode);
+                if (!mounted) return;
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      ok ? 'Added to "${lists.active!.name}"' : 'Could not add',
+                    ),
+                  ),
+                );
+              },
+            ),
           if (loggedIn)
             IconButton(
               tooltip: 'Edit',
@@ -95,7 +124,9 @@ class _ProductScreenState extends State<ProductScreen> {
                 if (!mounted) return;
                 if (ok == true) {
                   messenger.showSnackBar(
-                    const SnackBar(content: Text('Photo uploaded. Pull to refresh images.')),
+                    const SnackBar(
+                        content:
+                            Text('Photo uploaded. Pull to refresh images.')),
                   );
                 }
               },
@@ -125,21 +156,22 @@ class _ProductScreenState extends State<ProductScreen> {
                   const SizedBox(height: 16),
                   _Ingredients(text: product.ingredientsText!),
                 ],
-                if ((product.allergens?.isNotEmpty ?? false) || (product.additives?.isNotEmpty ?? false))
-                  ...[
-                    const SizedBox(height: 16),
-                    _AllergensAdditives(
-                      allergens: product.allergens ?? const [],
-                      additives: product.additives ?? const [],
-                    ),
-                  ],
+                if ((product.allergens?.isNotEmpty ?? false) ||
+                    (product.additives?.isNotEmpty ?? false)) ...[
+                  const SizedBox(height: 16),
+                  _AllergensAdditives(
+                    allergens: product.allergens ?? const [],
+                    additives: product.additives ?? const [],
+                  ),
+                ],
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
                   onPressed: () => showModalBottomSheet<void>(
                     context: context,
                     showDragHandle: true,
                     isScrollControlled: true,
-                    builder: (_) => RobotoffQuestionsSheet(barcode: product.barcode),
+                    builder: (_) =>
+                        RobotoffQuestionsSheet(barcode: product.barcode),
                   ),
                   icon: const Icon(Icons.question_mark),
                   label: const Text('Questions'),
@@ -157,7 +189,8 @@ class _ProductScreenState extends State<ProductScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton.icon(
-                        onPressed: () => Clipboard.setData(ClipboardData(text: product.barcode)),
+                        onPressed: () => Clipboard.setData(
+                            ClipboardData(text: product.barcode)),
                         icon: const Icon(Icons.copy),
                         label: const Text('Copy barcode'),
                       ),
@@ -215,7 +248,8 @@ class _Overview extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(product.name ?? 'Unnamed product', style: Theme.of(context).textTheme.headlineSmall),
+        Text(product.name ?? 'Unnamed product',
+            style: Theme.of(context).textTheme.headlineSmall),
         const SizedBox(height: 4),
         Text('Brand: ${product.brand ?? '—'}'),
         const SizedBox(height: 8),
@@ -232,7 +266,9 @@ class _Nutrition extends StatelessWidget {
   const _Nutrition({required this.product});
 
   Widget _kv(BuildContext ctx, String label, double? v, {String unit = 'g'}) {
-    final text = (v == null) ? '—' : (v.toStringAsFixed(v == v.roundToDouble() ? 0 : 1) + unit);
+    final text = (v == null)
+        ? '—'
+        : (v.toStringAsFixed(v == v.roundToDouble() ? 0 : 1) + unit);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -251,7 +287,8 @@ class _Nutrition extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Nutrition (per 100g/ml)', style: Theme.of(context).textTheme.titleMedium),
+            Text('Nutrition (per 100g/ml)',
+                style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 12),
             Wrap(
               spacing: 24,
@@ -308,13 +345,27 @@ class _AllergensAdditives extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Allergens & additives', style: Theme.of(context).textTheme.titleMedium),
+            Text('Allergens & additives',
+                style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-            if (allergens.isEmpty) const Text('Allergens: —')
-            else Wrap(spacing: 8, runSpacing: 8, children: allergens.map((a) => Chip(label: Text(a))).toList()),
+            if (allergens.isEmpty)
+              const Text('Allergens: —')
+            else
+              Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children:
+                      allergens.map((a) => Chip(label: Text(a))).toList()),
             const SizedBox(height: 8),
-            if (additives.isEmpty) const Text('Additives: —')
-            else Wrap(spacing: 8, runSpacing: 8, children: additives.map((a) => Chip(label: Text(a.toUpperCase()))).toList()),
+            if (additives.isEmpty)
+              const Text('Additives: —')
+            else
+              Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: additives
+                      .map((a) => Chip(label: Text(a.toUpperCase())))
+                      .toList()),
           ],
         ),
       ),
@@ -348,7 +399,8 @@ class _NotFound extends StatelessWidget {
                   label: const Text('Scan another'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: () => Clipboard.setData(ClipboardData(text: barcode)),
+                  onPressed: () =>
+                      Clipboard.setData(ClipboardData(text: barcode)),
                   icon: const Icon(Icons.copy),
                   label: const Text('Copy code'),
                 ),
