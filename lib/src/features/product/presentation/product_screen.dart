@@ -6,7 +6,6 @@ import '../../../data/fooddb_repository.dart';
 import '../../../data/models/product.dart';
 import '../../../routing/app_router.dart';
 import '../../../data/off/off_auth.dart';
-import '../../../data/lists/lists_controller.dart';
 import 'add_photo_sheet.dart';
 import 'edit_product_sheet.dart';
 import 'robotoff_questions_sheet.dart';
@@ -53,39 +52,12 @@ class _ProductScreenState extends State<ProductScreen> {
   @override
   Widget build(BuildContext context) {
     final loggedIn = context.watch<OffAuth>().isLoggedIn;
-    final lists = context.watch<ListsController>();
     return Scaffold(
       appBar: AppBar(
         title: const Text('Product'),
         actions: [
           IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
-          if (lists.active != null)
-            IconButton(
-              tooltip: 'Add to list',
-              icon: const Icon(Icons.playlist_add),
-              onPressed: () async {
-                final messenger = ScaffoldMessenger.of(context);
-                final listsController = context.read<ListsController>();
-                final product = _latestProduct ?? await _future;
-                if (!mounted) return;
-                if (product == null) {
-                  messenger.showSnackBar(
-                    const SnackBar(content: Text('Load the product first')),
-                  );
-                  return;
-                }
-                final bool ok =
-                    await listsController.addBarcode(product.barcode);
-                if (!mounted) return;
-                messenger.showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      ok ? 'Added to "${lists.active!.name}"' : 'Could not add',
-                    ),
-                  ),
-                );
-              },
-            ),
+          // Lists feature removed in Step 20 (previous Add-to-list action deleted)
           if (loggedIn)
             IconButton(
               tooltip: 'Edit',

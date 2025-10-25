@@ -6,8 +6,6 @@ import 'src/data/off/off_auth.dart';
 import 'src/data/off/off_config.dart';
 import 'src/data/fooddb_repository.dart';
 import 'src/data/prefs/prefs_repository.dart';
-import 'src/data/lists/lists_controller.dart';
-import 'src/data/lists/lists_store.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,13 +25,6 @@ class EatInsightApp extends StatelessWidget {
         ChangeNotifierProvider<OffAuth>(create: (_) => OffAuth()..init()),
         ChangeNotifierProvider(
             create: (_) => PrefsController(PrefsRepository())..load()),
-        ChangeNotifierProvider(
-          create: (_) {
-            final controller = ListsController(ListsStore());
-            controller.load();
-            return controller;
-          },
-        ),
       ],
       child: MaterialApp.router(
         debugShowCheckedModeBanner: false,

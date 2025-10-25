@@ -1,0 +1,258 @@
+--- a/lib/main.dart
++++ b/lib/main.dart
+@@ -1,10 +1,8 @@
+ import 'package:flutter/material.dart';
+ import 'src/theme/app_theme.dart';
+ import 'src/routing/app_router.dart';
+ import 'package:provider/provider.dart';
+ import 'src/data/prefs/prefs_repository.dart';
+-import 'src/data/lists/lists_controller.dart';
+-import 'src/data/lists/lists_store.dart';
+ 
+ void main() {
+   WidgetsFlutterBinding.ensureInitialized();
+   runApp(
+@@ -13,14 +11,9 @@
+     MultiProvider(
+       providers: [
+         ChangeNotifierProvider(create: (_) => PrefsController(PrefsRepository())..load()),
+-        ChangeNotifierProvider(create: (_) {
+-          final c = ListsController(ListsStore());
+-          c.load();
+-          return c;
+-        }),
+       ],
+       child: const EatInsightApp(),
+     ),
+   );
+ }
+ 
+--- a/lib/src/features/product/presentation/product_screen.dart
++++ b/lib/src/features/product/presentation/product_screen.dart
+@@ -9,11 +9,9 @@ import '../../../routing/app_router.dart';
+ import '../../../data/off/off_auth.dart';
+ import 'add_photo_sheet.dart';
+ import 'edit_product_sheet.dart';
+-import '../../../data/lists/lists_controller.dart';
+ 
+ class ProductScreen extends StatefulWidget {
+   final String barcode;
+   const ProductScreen({super.key, required this.barcode});
+@@ -39,11 +37,10 @@ class _ProductScreenState extends State<ProductScreen> {
+   @override
+   Widget build(BuildContext context) {
+     final loggedIn = context.watch<OffAuth>().isLoggedIn;
+-    final lists = context.watch<ListsController>();
+     return Scaffold(
+       appBar: AppBar(
+         title: const Text('Product'),
+         actions: [
+           IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
+-          if (lists.active != null)
+-            IconButton(tooltip: 'Add to list', icon: const Icon(Icons.playlist_add), onPressed: () async { /* removed */ }),
++          // Lists feature removed in Step 20 (previous Add-to-list action deleted)
+           if (loggedIn)
+             IconButton(
+               tooltip: 'Edit',
+               icon: const Icon(Icons.edit),
+               onPressed: () async {
+                 // Use the most recent loaded product
+                 final current = await _future;
+                 if (!context.mounted) return;
+                 if (current == null) {
+                   ScaffoldMessenger.of(context).showSnackBar(
+                     const SnackBar(content: Text('Load the product first')),
+                   );
+                   return;
+                 }
+                 final ok = await showModalBottomSheet<bool>(
+                   context: context,
+                   showDragHandle: true,
+                   isScrollControlled: true,
+                   builder: (_) => EditProductSheet(product: current),
+                 );
+                 if (!context.mounted) return;
+                 if (ok == true) _refresh();
+               },
+             ),
+         ],
+       ),
+--- a/lib/src/features/lists/presentation/lists_screen.dart
++++ b/lib/src/features/lists/presentation/lists_screen.dart
+@@ -1,171 +1,26 @@
+-import 'package:flutter/material.dart';
+-import 'package:provider/provider.dart';
+-import '../../../data/lists/lists_controller.dart';
+-
+-class ListsScreen extends StatefulWidget {
+-  const ListsScreen({super.key});
+-  @override
+-  State<ListsScreen> createState() => _ListsScreenState();
+-}
+-
+-class _ListsScreenState extends State<ListsScreen> {
+-  final _nameCtrl = TextEditingController();
+-  final _importCtrl = TextEditingController();
+-
+-  @override
+-  void dispose() {
+-    _nameCtrl.dispose();
+-    _importCtrl.dispose();
+-    super.dispose();
+-  }
+-
+-  @override
+-  Widget build(BuildContext context) {
+-    final ctrl = context.watch<ListsController>();
+-    final lists = ctrl.all;
+-    final active = ctrl.activeId;
+-    return Scaffold(
+-      appBar: AppBar(title: const Text('Lists')),
+-      body: Padding(
+-        padding: const EdgeInsets.all(16),
+-        child: Column(
+-          crossAxisAlignment: CrossAxisAlignment.start,
+-          children: [
+-            Row(
+-              children: [
+-                Expanded(
+-                  child: TextField(
+-                    controller: _nameCtrl,
+-                    decoration: const InputDecoration(
+-                      labelText: 'New list name',
+-                    ),
+-                  ),
+-                ),
+-                const SizedBox(width: 8),
+-                FilledButton(
+-                  onPressed: () async {
+-                    await context.read<ListsController>().createList(_nameCtrl.text);
+-                    _nameCtrl.clear();
+-                    if (!mounted) return;
+-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('List created')));
+-                  },
+-                  child: const Text('Create'),
+-                ),
+-              ],
+-            ),
+-            const SizedBox(height: 16),
+-            if (lists.isEmpty) const Text('No lists yet. Create one to get started.'),
+-            if (lists.isNotEmpty) ...[
+-              const Text('Your lists:'),
+-              const SizedBox(height: 8),
+-              Expanded(
+-                child: ListView.separated(
+-                  itemCount: lists.length,
+-                  separatorBuilder: (_, __) => const Divider(height: 0),
+-                  itemBuilder: (_, i) {
+-                    final l = lists[i];
+-                    final isActive = l.id == active;
+-                    return ListTile(
+-                      title: Text(l.name),
+-                      subtitle: Text('${l.barcodes.length} items'),
+-                      leading: isActive ? const Icon(Icons.check_circle) : const Icon(Icons.circle_outlined),
+-                      trailing: PopupMenuButton<String>(
+-                        onSelected: (v) async {
+-                          if (v == 'set') {
+-                            await context.read<ListsController>().setActive(l.id);
+-                          } else if (v == 'rename') {
+-                            final newName = await _promptRename(context, l.name);
+-                            if (newName != null) {
+-                              await context.read<ListsController>().renameList(l.id, newName);
+-                            }
+-                          } else if (v == 'delete') {
+-                            await context.read<ListsController>().deleteList(l.id);
+-                          } else if (v == 'export') {
+-                            final path = await context.read<ListsController>().exportActive();
+-                            if (!mounted) return;
+-                            if (path != null) {
+-                              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Exported to: $path')));
+-                            }
+-                          }
+-                        },
+-                        itemBuilder: (_) => [
+-                          const PopupMenuItem(value: 'set', child: Text('Set active')),
+-                          const PopupMenuItem(value: 'rename', child: Text('Rename')),
+-                          const PopupMenuItem(value: 'export', child: Text('Export as JSON')),
+-                          const PopupMenuItem(value: 'delete', child: Text('Delete')),
+-                        ],
+-                      ),
+-                      onTap: () => context.read<ListsController>().setActive(l.id),
+-                    );
+-                  },
+-                ),
+-              ),
+-              const SizedBox(height: 12),
+-              Row(
+-                children: [
+-                  Expanded(
+-                    child: TextField(
+-                      controller: _importCtrl,
+-                      decoration: const InputDecoration(
+-                        labelText: 'Import file path (JSON)',
+-                        helperText: 'Paste a file path to import a list',
+-                      ),
+-                    ),
+-                  ),
+-                  const SizedBox(width: 8),
+-                  OutlinedButton(
+-                    onPressed: () async {
+-                      final ok = await context.read<ListsController>().importFromPath(_importCtrl.text.trim());
+-                      if (!mounted) return;
+-                      ScaffoldMessenger.of(context).showSnackBar(
+-                        SnackBar(content: Text(ok ? 'Imported list' : 'Could not import')),
+-                      );
+-                    },
+-                    child: const Text('Import'),
+-                  ),
+-                ],
+-              ),
+-            ],
+-          ],
+-        ),
+-      ),
+-    );
+-  }
+-
+-  Future<String?> _promptRename(BuildContext context, String current) async {
+-    final ctrl = TextEditingController(text: current);
+-    return showDialog<String>(
+-      context: context,
+-      builder: (ctx) => AlertDialog(
+-        title: const Text('Rename list'),
+-        content: TextField(controller: ctrl, decoration: const InputDecoration(labelText: 'Name')),
+-        actions: [
+-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+-          FilledButton(onPressed: () => Navigator.pop(ctx, ctrl.text), child: const Text('Save')),
+-        ],
+-      ),
+-    );
+-  }
+-}
++import 'package:flutter/material.dart';
++
++class ListsScreen extends StatelessWidget {
++  const ListsScreen({super.key});
++  @override
++  Widget build(BuildContext context) {
++    return const Scaffold(
++      body: Center(
++        child: Padding(
++          padding: EdgeInsets.all(24),
++          child: Text(
++            'Lists feature has been removed.',
++            textAlign: TextAlign.center,
++          ),
++        ),
++      ),
++    );
++  }
++}
+--- a/lib/src/data/lists/lists_controller.dart
++++ /dev/null
+@@ -1,167 +0,0 @@
+-(deleted)
+--- a/lib/src/data/lists/lists_store.dart
++++ /dev/null
+@@ -1,196 +0,0 @@
+-(deleted)
