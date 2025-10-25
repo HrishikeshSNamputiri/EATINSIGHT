@@ -1,0 +1,226 @@
+diff --git a/lib/src/data/fooddb_repository.dart b/lib/src/data/fooddb_repository.dart
+index 2200479..2460195 100644
+--- a/lib/src/data/fooddb_repository.dart
++++ b/lib/src/data/fooddb_repository.dart
+@@ -13,9 +13,17 @@ class FoodDbRepository {
+   final OffSearchApi _search = OffSearchApi();
+ 
+   /// Fetch product by barcode from OFF (world server). Returns null if not found.
+-  Future<Product?> fetchByBarcode(String barcode) async {
++  Future<Product?> fetchByBarcode(
++    String barcode, {
++    String? languageCode,
++    String? countryCode,
++  }) async {
+     try {
+-      return await _api.getProduct(barcode);
++      return await _api.getProduct(
++        barcode,
++        languageCode: languageCode,
++        countryCode: countryCode,
++      );
+     } catch (_) {
+       // Keep errors quiet for now; Step 10 will add diagnostics & retry policy.
+       return null;
+diff --git a/lib/src/data/off/off_api.dart b/lib/src/data/off/off_api.dart
+index 797ac68..b7da63a 100644
+--- a/lib/src/data/off/off_api.dart
++++ b/lib/src/data/off/off_api.dart
+@@ -17,9 +17,50 @@ class OffApi {
+               },
+             ));
+ 
+-  Future<Product?> getProduct(String barcode) async {
++  Future<Product?> getProduct(
++    String barcode, {
++    String? languageCode,
++    String? countryCode,
++  }) async {
+     if (barcode.trim().isEmpty) return null;
+-    final res = await _dio.get('/api/v0/product/$barcode.json');
++    final String normalizedLanguage = (languageCode ?? '').trim().toLowerCase();
++    final String normalizedCountry = (countryCode ?? '').trim().toLowerCase();
++    final String languageTag = normalizedLanguage.replaceAll('-', '_');
++    final String preferredLocale = Env.offPreferredLocale.toLowerCase();
++
++    final Set<String> fields = <String>{
++      'code',
++      'product_name',
++      'brands',
++      'image_front_url',
++      'image_small_url',
++      'selected_images',
++      'quantity',
++      'ingredients_text',
++      'nutrition_grades',
++      'nutriments',
++    };
++    if (normalizedLanguage.isNotEmpty) {
++      fields
++        ..add('product_name_$languageTag')
++        ..add('generic_name_$languageTag')
++        ..add('ingredients_text_$languageTag');
++    }
++    if (preferredLocale.isNotEmpty && preferredLocale != languageTag) {
++      fields
++        ..add('product_name_${preferredLocale.replaceAll('-', '_')}')
++        ..add('generic_name_${preferredLocale.replaceAll('-', '_')}')
++        ..add('ingredients_text_${preferredLocale.replaceAll('-', '_')}');
++    }
++
++    final res = await _dio.get(
++      '/api/v2/product/$barcode.json',
++      queryParameters: <String, dynamic>{
++        if (normalizedLanguage.isNotEmpty) 'lc': normalizedLanguage,
++        if (normalizedCountry.isNotEmpty) 'cc': normalizedCountry,
++        'fields': fields.join(','),
++      },
++    );
+     if (res.statusCode != 200) return null;
+ 
+     final data = res.data is Map ? res.data as Map : {};
+@@ -30,9 +71,21 @@ class OffApi {
+     if (p == null) return null;
+ 
+     // Helpers
+-    String? pickName(Map m) =>
+-        (m['product_name_${Env.offPreferredLocale}'] as String?) ??
+-        (m['product_name'] as String?);
++    String? localizedValue(Map m, String base) {
++      if (languageTag.isNotEmpty) {
++        final String key = '${base}_$languageTag';
++        final String? value = m[key] as String?;
++        if (value != null && value.trim().isNotEmpty) return value;
++      }
++      if (preferredLocale.isNotEmpty) {
++        final String key = '${base}_${preferredLocale.replaceAll('-', '_')}';
++        final String? value = m[key] as String?;
++        if (value != null && value.trim().isNotEmpty) return value;
++      }
++      return m[base] as String?;
++    }
++
++    String? pickName(Map m) => localizedValue(m, 'product_name');
+ 
+     String? firstBrand(String? brandsCsv) =>
+         brandsCsv?.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).firstOrNull;
+@@ -63,8 +116,7 @@ class OffApi {
+       brand: firstBrand(p['brands'] as String?),
+       imageUrl: p['image_front_url'] as String?,
+       quantity: p['quantity'] as String?,
+-      ingredientsText: (p['ingredients_text_${Env.offPreferredLocale}'] as String?) ??
+-          (p['ingredients_text'] as String?),
++      ingredientsText: localizedValue(p, 'ingredients_text'),
+       nutritionGrade: (p['nutrition_grades'] as String?)?.trim(), // a..e
+       energyKcal100g: numValue(nutr, 'energy-kcal_100g') ?? numValue(nutr, 'energy-kcal_value'),
+       fat100g: numValue(nutr, 'fat_100g'),
+diff --git a/lib/src/data/off/off_config.dart b/lib/src/data/off/off_config.dart
+index fa8510c..2121aad 100644
+--- a/lib/src/data/off/off_config.dart
++++ b/lib/src/data/off/off_config.dart
+@@ -26,7 +26,8 @@ class OffConfig {
+     OpenFoodAPIConfiguration.globalLanguages = <OpenFoodFactsLanguage>[
+       resolvedLanguage,
+     ];
+-    // Keep country null here; concrete queries provide the country context.
+-    OpenFoodAPIConfiguration.globalCountry = null;
++    final String? countryCode = prefs.country?.trim().toLowerCase();
++    OpenFoodAPIConfiguration.globalCountry =
++        OpenFoodFactsCountry.fromOffTag(countryCode ?? '');
+   }
+ }
+diff --git a/lib/src/features/product/presentation/product_screen.dart b/lib/src/features/product/presentation/product_screen.dart
+index 21d0e98..a28c231 100644
+--- a/lib/src/features/product/presentation/product_screen.dart
++++ b/lib/src/features/product/presentation/product_screen.dart
+@@ -6,6 +6,7 @@ import '../../../data/fooddb_repository.dart';
+ import '../../../data/models/product.dart';
+ import '../../../routing/app_router.dart';
+ import '../../../data/off/off_auth.dart';
++import '../../../data/prefs/prefs_repository.dart';
+ import 'add_photo_sheet.dart';
+ import 'edit_product_sheet.dart';
+ import 'robotoff_questions_sheet.dart';
+@@ -21,37 +22,50 @@ class ProductScreen extends StatefulWidget {
+ class _ProductScreenState extends State<ProductScreen> {
+   late Future<Product?> _future;
+   Product? _latestProduct;
++  int _fetchVersion = 0;
+ 
+   @override
+   void initState() {
+     super.initState();
+-    _future = context.read<FoodDbRepository>().fetchByBarcode(widget.barcode);
+-    _future.then((value) {
+-      if (mounted) {
+-        setState(() {
+-          _latestProduct = value;
+-        });
+-      }
++    final Future<Product?> initial = _createFetchFuture();
++    _future = initial;
++    final int token = ++_fetchVersion;
++    initial.then((Product? value) {
++      if (!mounted || token != _fetchVersion) return;
++      setState(() => _latestProduct = value);
+     });
+   }
+ 
++  Future<Product?> _createFetchFuture() {
++    final FoodDbRepository repo = context.read<FoodDbRepository>();
++    final prefs = context.read<PrefsController>().prefs;
++    return repo.fetchByBarcode(
++      widget.barcode,
++      languageCode: prefs.language,
++      countryCode: prefs.country,
++    );
++  }
++
+   Future<void> _refresh() async {
+-    final repo = context.read<FoodDbRepository>();
+-    final f = repo.fetchByBarcode(widget.barcode);
+-    setState(() => _future = f);
+-    f.then((value) {
+-      if (mounted) {
+-        setState(() {
+-          _latestProduct = value;
+-        });
+-      }
+-    });
+-    await f;
++    final Future<Product?> next = _createFetchFuture();
++    final int token = ++_fetchVersion;
++    setState(() => _future = next);
++    final Product? result = await next;
++    if (!mounted || token != _fetchVersion) return;
++    setState(() => _latestProduct = result);
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+     final loggedIn = context.watch<OffAuth>().isLoggedIn;
++    final prefs = context.watch<PrefsController>().prefs;
++    final String languageTag =
++        (prefs.language ?? '').trim().toLowerCase();
++    final String countryTag = (prefs.country ?? '').trim().toLowerCase();
++    final String filtersCaption = [
++      if (languageTag.isNotEmpty) 'lc=$languageTag',
++      if (countryTag.isNotEmpty) 'cc=$countryTag',
++    ].join(', ');
+     return Scaffold(
+       appBar: AppBar(
+         title: const Text('Product'),
+@@ -119,6 +133,13 @@ class _ProductScreenState extends State<ProductScreen> {
+             child: ListView(
+               padding: const EdgeInsets.all(16),
+               children: [
++                if (filtersCaption.isNotEmpty) ...[
++                  Text(
++                    filtersCaption,
++                    style: Theme.of(context).textTheme.bodySmall,
++                  ),
++                  const SizedBox(height: 12),
++                ],
+                 _HeroImage(url: product.imageUrl),
+                 const SizedBox(height: 16),
+                 _Overview(product: product),

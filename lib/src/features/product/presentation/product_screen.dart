@@ -6,6 +6,7 @@ import '../../../data/fooddb_repository.dart';
 import '../../../data/models/product.dart';
 import '../../../routing/app_router.dart';
 import '../../../data/off/off_auth.dart';
+import '../../../data/prefs/prefs_repository.dart';
 import 'add_photo_sheet.dart';
 import 'edit_product_sheet.dart';
 import 'robotoff_questions_sheet.dart';
@@ -21,37 +22,50 @@ class ProductScreen extends StatefulWidget {
 class _ProductScreenState extends State<ProductScreen> {
   late Future<Product?> _future;
   Product? _latestProduct;
+  int _fetchVersion = 0;
 
   @override
   void initState() {
     super.initState();
-    _future = context.read<FoodDbRepository>().fetchByBarcode(widget.barcode);
-    _future.then((value) {
-      if (mounted) {
-        setState(() {
-          _latestProduct = value;
-        });
-      }
+    final Future<Product?> initial = _createFetchFuture();
+    _future = initial;
+    final int token = ++_fetchVersion;
+    initial.then((Product? value) {
+      if (!mounted || token != _fetchVersion) return;
+      setState(() => _latestProduct = value);
     });
   }
 
+  Future<Product?> _createFetchFuture() {
+    final FoodDbRepository repo = context.read<FoodDbRepository>();
+    final prefs = context.read<PrefsController>().prefs;
+    return repo.fetchByBarcode(
+      widget.barcode,
+      languageCode: prefs.language,
+      countryCode: prefs.country,
+    );
+  }
+
   Future<void> _refresh() async {
-    final repo = context.read<FoodDbRepository>();
-    final f = repo.fetchByBarcode(widget.barcode);
-    setState(() => _future = f);
-    f.then((value) {
-      if (mounted) {
-        setState(() {
-          _latestProduct = value;
-        });
-      }
-    });
-    await f;
+    final Future<Product?> next = _createFetchFuture();
+    final int token = ++_fetchVersion;
+    setState(() => _future = next);
+    final Product? result = await next;
+    if (!mounted || token != _fetchVersion) return;
+    setState(() => _latestProduct = result);
   }
 
   @override
   Widget build(BuildContext context) {
     final loggedIn = context.watch<OffAuth>().isLoggedIn;
+    final prefs = context.watch<PrefsController>().prefs;
+    final String languageTag =
+        (prefs.language ?? '').trim().toLowerCase();
+    final String countryTag = (prefs.country ?? '').trim().toLowerCase();
+    final String filtersCaption = [
+      if (languageTag.isNotEmpty) 'lc=$languageTag',
+      if (countryTag.isNotEmpty) 'cc=$countryTag',
+    ].join(', ');
     return Scaffold(
       appBar: AppBar(
         title: const Text('Product'),
@@ -119,6 +133,13 @@ class _ProductScreenState extends State<ProductScreen> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                if (filtersCaption.isNotEmpty) ...[
+                  Text(
+                    filtersCaption,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 _HeroImage(url: product.imageUrl),
                 const SizedBox(height: 16),
                 _Overview(product: product),

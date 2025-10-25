@@ -13,9 +13,17 @@ class FoodDbRepository {
   final OffSearchApi _search = OffSearchApi();
 
   /// Fetch product by barcode from OFF (world server). Returns null if not found.
-  Future<Product?> fetchByBarcode(String barcode) async {
+  Future<Product?> fetchByBarcode(
+    String barcode, {
+    String? languageCode,
+    String? countryCode,
+  }) async {
     try {
-      return await _api.getProduct(barcode);
+      return await _api.getProduct(
+        barcode,
+        languageCode: languageCode,
+        countryCode: countryCode,
+      );
     } catch (_) {
       // Keep errors quiet for now; Step 10 will add diagnostics & retry policy.
       return null;

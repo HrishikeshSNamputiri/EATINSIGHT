@@ -26,7 +26,8 @@ class OffConfig {
     OpenFoodAPIConfiguration.globalLanguages = <OpenFoodFactsLanguage>[
       resolvedLanguage,
     ];
-    // Keep country null here; concrete queries provide the country context.
-    OpenFoodAPIConfiguration.globalCountry = null;
+    final String? countryCode = prefs.country?.trim().toLowerCase();
+    OpenFoodAPIConfiguration.globalCountry =
+        OpenFoodFactsCountry.fromOffTag(countryCode ?? '');
   }
 }

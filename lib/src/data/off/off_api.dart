@@ -17,9 +17,50 @@ class OffApi {
               },
             ));
 
-  Future<Product?> getProduct(String barcode) async {
+  Future<Product?> getProduct(
+    String barcode, {
+    String? languageCode,
+    String? countryCode,
+  }) async {
     if (barcode.trim().isEmpty) return null;
-    final res = await _dio.get('/api/v0/product/$barcode.json');
+    final String normalizedLanguage = (languageCode ?? '').trim().toLowerCase();
+    final String normalizedCountry = (countryCode ?? '').trim().toLowerCase();
+    final String languageTag = normalizedLanguage.replaceAll('-', '_');
+    final String preferredLocale = Env.offPreferredLocale.toLowerCase();
+
+    final Set<String> fields = <String>{
+      'code',
+      'product_name',
+      'brands',
+      'image_front_url',
+      'image_small_url',
+      'selected_images',
+      'quantity',
+      'ingredients_text',
+      'nutrition_grades',
+      'nutriments',
+    };
+    if (normalizedLanguage.isNotEmpty) {
+      fields
+        ..add('product_name_$languageTag')
+        ..add('generic_name_$languageTag')
+        ..add('ingredients_text_$languageTag');
+    }
+    if (preferredLocale.isNotEmpty && preferredLocale != languageTag) {
+      fields
+        ..add('product_name_${preferredLocale.replaceAll('-', '_')}')
+        ..add('generic_name_${preferredLocale.replaceAll('-', '_')}')
+        ..add('ingredients_text_${preferredLocale.replaceAll('-', '_')}');
+    }
+
+    final res = await _dio.get(
+      '/api/v2/product/$barcode.json',
+      queryParameters: <String, dynamic>{
+        if (normalizedLanguage.isNotEmpty) 'lc': normalizedLanguage,
+        if (normalizedCountry.isNotEmpty) 'cc': normalizedCountry,
+        'fields': fields.join(','),
+      },
+    );
     if (res.statusCode != 200) return null;
 
     final data = res.data is Map ? res.data as Map : {};
@@ -30,9 +71,21 @@ class OffApi {
     if (p == null) return null;
 
     // Helpers
-    String? pickName(Map m) =>
-        (m['product_name_${Env.offPreferredLocale}'] as String?) ??
-        (m['product_name'] as String?);
+    String? localizedValue(Map m, String base) {
+      if (languageTag.isNotEmpty) {
+        final String key = '${base}_$languageTag';
+        final String? value = m[key] as String?;
+        if (value != null && value.trim().isNotEmpty) return value;
+      }
+      if (preferredLocale.isNotEmpty) {
+        final String key = '${base}_${preferredLocale.replaceAll('-', '_')}';
+        final String? value = m[key] as String?;
+        if (value != null && value.trim().isNotEmpty) return value;
+      }
+      return m[base] as String?;
+    }
+
+    String? pickName(Map m) => localizedValue(m, 'product_name');
 
     String? firstBrand(String? brandsCsv) =>
         brandsCsv?.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty).firstOrNull;
@@ -63,8 +116,7 @@ class OffApi {
       brand: firstBrand(p['brands'] as String?),
       imageUrl: p['image_front_url'] as String?,
       quantity: p['quantity'] as String?,
-      ingredientsText: (p['ingredients_text_${Env.offPreferredLocale}'] as String?) ??
-          (p['ingredients_text'] as String?),
+      ingredientsText: localizedValue(p, 'ingredients_text'),
       nutritionGrade: (p['nutrition_grades'] as String?)?.trim(), // a..e
       energyKcal100g: numValue(nutr, 'energy-kcal_100g') ?? numValue(nutr, 'energy-kcal_value'),
       fat100g: numValue(nutr, 'fat_100g'),
