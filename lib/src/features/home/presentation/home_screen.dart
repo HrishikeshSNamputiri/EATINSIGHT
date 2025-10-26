@@ -10,7 +10,6 @@ class HomeScreen extends StatelessWidget {
     final cards = <_Nav>[
       _Nav('Scan', AppRoutes.scan, Icons.qr_code_scanner),
       _Nav('Search', AppRoutes.search, Icons.search),
-      _Nav('Prices', AppRoutes.prices, Icons.currency_rupee),
       _Nav('Profile', AppRoutes.profile, Icons.person),
     ];
     return Scaffold(

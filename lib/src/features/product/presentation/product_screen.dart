@@ -10,6 +10,7 @@ import '../../../data/prefs/prefs_repository.dart';
 import 'add_photo_sheet.dart';
 import 'edit_product_sheet.dart';
 import 'robotoff_questions_sheet.dart';
+import 'widgets/product_prices_tile.dart';
 
 class ProductScreen extends StatefulWidget {
   final String barcode;
@@ -143,6 +144,11 @@ class _ProductScreenState extends State<ProductScreen> {
                 _HeroImage(url: product.imageUrl),
                 const SizedBox(height: 16),
                 _Overview(product: product),
+                const SizedBox(height: 16),
+                Card(
+                  margin: EdgeInsets.zero,
+                  child: ProductPricesTile(product: product),
+                ),
                 const SizedBox(height: 16),
                 _Nutrition(product: product),
                 if ((product.ingredientsText?.trim().isNotEmpty ?? false)) ...[
