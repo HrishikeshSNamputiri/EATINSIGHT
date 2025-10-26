@@ -1,0 +1,48 @@
+--- a/test/widget_test.dart
++++ b/test/widget_test.dart
+@@ -1,29 +1,48 @@
+ import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+ import 'package:eatinsight/main.dart' as app;
+ 
+ void main() {
+-  testWidgets('Home screen renders navigation tiles', (WidgetTester tester) async {
++  testWidgets('Home screen renders navigation tiles', (WidgetTester tester) async {
+     // Launch the app
+     app.main();
+     await tester.pumpAndSettle();
+ 
+-    // Bottom bar should have 5 items previously: Home, Scan, Search, Prices, Profile
+-    expect(find.text('Home'), findsOneWidget);
+-    expect(find.text('Scan'), findsOneWidget);
+-    expect(find.text('Search'), findsOneWidget);
+-    expect(find.text('Prices'), findsOneWidget);
+-    expect(find.text('Profile'), findsOneWidget);
++    // Bottom bar now has 4 items: Home, Scan, Search, Profile (Prices/Lists removed)
++    expect(find.text('Home'), findsOneWidget);
++    expect(find.text('Scan'), findsOneWidget);
++    expect(find.text('Search'), findsOneWidget);
++    expect(find.text('Profile'), findsOneWidget);
++    expect(find.text('Prices'), findsNothing);
++    expect(find.text('Lists'), findsNothing);
+ 
+     // Open drawer
+     await tester.tap(find.byTooltip('Open navigation menu'));
+     await tester.pumpAndSettle();
+ 
+-    // Drawer previously contained: Home, Scan, Search, Prices, Profile
+-    expect(find.widgetWithText(ListTile, 'Home'), findsOneWidget);
+-    expect(find.widgetWithText(ListTile, 'Scan'), findsOneWidget);
+-    expect(find.widgetWithText(ListTile, 'Search'), findsOneWidget);
+-    expect(find.widgetWithText(ListTile, 'Prices'), findsOneWidget);
+-    expect(find.widgetWithText(ListTile, 'Profile'), findsOneWidget);
++    // Drawer now contains: Home, Scan, Search, Profile (no Prices/Lists/Dev items)
++    expect(find.widgetWithText(ListTile, 'Home'), findsOneWidget);
++    expect(find.widgetWithText(ListTile, 'Scan'), findsOneWidget);
++    expect(find.widgetWithText(ListTile, 'Search'), findsOneWidget);
++    expect(find.widgetWithText(ListTile, 'Profile'), findsOneWidget);
++    expect(find.widgetWithText(ListTile, 'Prices'), findsNothing);
++    expect(find.widgetWithText(ListTile, 'Lists'), findsNothing);
++    expect(find.text('(Dev) Open by Barcode'), findsNothing);
+   });
+ }
