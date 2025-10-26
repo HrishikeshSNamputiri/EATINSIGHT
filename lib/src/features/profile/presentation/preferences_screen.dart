@@ -20,32 +20,53 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
   bool _scannerVibration = true;
   bool _keepScreenOn = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = context.read<PrefsController>();
-    _ctrl.addListener(_onChange);
-    _ctrl.load();
-  }
-
-  void _onChange() {
-    final p = _ctrl.prefs;
+  void _applyPrefs(UserPrefs p) {
+    debugPrint(
+      '[PreferencesScreen] _applyPrefs -> country=${p.country}, language=${p.language}, currency=${p.currency}, '
+      'haptics=${p.haptics}, scannerVibration=${p.scannerVibration}, keepScreenOn=${p.keepScreenOn}',
+    );
     _countryCode = p.country;
     _languageCode = p.language;
     _currencyCode = p.currency;
     _haptics = p.haptics;
     _scannerVibration = p.scannerVibration;
     _keepScreenOn = p.keepScreenOn;
-    if (mounted) setState(() {});
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = context.read<PrefsController>();
+    _applyPrefs(_ctrl.prefs);
+    _ctrl.addListener(_handleChange);
+    debugPrint('[PreferencesScreen] initState -> scheduling controller.load() after first frame');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      debugPrint('[PreferencesScreen] postFrame -> invoking controller.load()');
+      _ctrl.load();
+    });
+  }
+
+  void _handleChange() {
+    if (!mounted) return;
+    debugPrint(
+      '[PreferencesScreen] _handleChange -> controller updated (loading=${_ctrl.loading}); applying prefs…',
+    );
+    setState(() => _applyPrefs(_ctrl.prefs));
   }
 
   @override
   void dispose() {
-    _ctrl.removeListener(_onChange);
+    _ctrl.removeListener(_handleChange);
     super.dispose();
   }
 
   Future<void> _save() async {
+    debugPrint(
+      '[PreferencesScreen] _save() -> preparing next prefs with country=$_countryCode, '
+      'language=$_languageCode, currency=$_currencyCode, haptics=$_haptics, '
+      'scannerVibration=$_scannerVibration, keepScreenOn=$_keepScreenOn',
+    );
     final UserPrefs next = _ctrl.prefs.copyWith(
       country: (_countryCode == null || _countryCode!.isEmpty) ? null : _countryCode,
       language: (_languageCode == null || _languageCode!.isEmpty) ? null : _languageCode,
@@ -54,6 +75,7 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
       scannerVibration: _scannerVibration,
       keepScreenOn: _keepScreenOn,
     );
+    debugPrint('[PreferencesScreen] _save() -> calling controller.update with: ${next.toString()}');
     await _ctrl.update(next);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Preferences saved.')));
@@ -121,6 +143,9 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                         subtitle: Text(item.code),
                         trailing: isSel ? const Icon(Icons.check) : null,
                         onTap: () {
+                          debugPrint(
+                            '[PreferencesScreen] _pickFrom -> selected ${item.code} (${item.name}) for "$title"',
+                          );
                           onSelected(item.code);
                           Navigator.of(ctx).pop();
                         },
@@ -133,6 +158,7 @@ class _PreferencesScreenState extends State<PreferencesScreen> {
                   children: [
                     OutlinedButton.icon(
                       onPressed: () {
+                        debugPrint('[PreferencesScreen] _pickFrom -> clearing selection for "$title"');
                         onSelected(null);
                         Navigator.of(ctx).pop();
                       },

@@ -49,6 +49,7 @@ class CurrencySymbolIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final String normalized = (code ?? '').trim().toUpperCase();
     final IconData? icon = _iconFor(normalized);
+    debugPrint('[CurrencySymbolIcon] build -> input="$code", normalized="$normalized", icon=$icon, size=$size');
     if (icon != null) {
       return Icon(icon, size: size);
     }
@@ -61,6 +62,7 @@ class CurrencySymbolIcon extends StatelessWidget {
     } catch (_) {
       symbol = '¤'; // Generic currency sign
     }
+    debugPrint('[CurrencySymbolIcon] using text symbol "$symbol" for currency "$normalized"');
 
     final Color? color = IconTheme.of(context).color;
     return Text(

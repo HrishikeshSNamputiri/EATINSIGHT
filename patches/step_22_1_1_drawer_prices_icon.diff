@@ -1,0 +1,86 @@
+--- a/lib/src/routing/scaffold_with_nav.dart
++++ b/lib/src/routing/scaffold_with_nav.dart
+@@ -1,6 +1,8 @@
+  import 'package:flutter/material.dart';
+  import 'package:go_router/go_router.dart';
++import 'package:provider/provider.dart';
+  import 'app_router.dart';
++import '../data/prefs/prefs_repository.dart';
+  import '../widgets/currency_symbol_icon.dart'
+  
+  class ScaffoldWithNavBar extends StatefulWidget {
+@@ -75,16 +77,12 @@ class _ScaffoldWithNavBarState extends State<ScaffoldWithNavBar> {
+        ),
+-      drawer: _AppDrawer(
+-        currentIndex: _index,
+-        onSelect: _onTap,
+-        currency: currency,
+-      ),
++      drawer: _AppDrawer(currentIndex: _index, onSelect: _onTap),
+      );
+    }
+  }
+  
+  class _AppDrawer extends StatelessWidget {
+    final int currentIndex;
+    final ValueChanged<int> onSelect;
+-  final String currency;
+-  const _AppDrawer({required this.currentIndex, required this.onSelect, required this.currency});
++  const _AppDrawer({required this.currentIndex, required this.onSelect});
+  
+    void _handleTap(BuildContext context, int index) {
+      Navigator.of(context).pop();
+@@ -93,10 +91,14 @@ class _AppDrawer extends StatelessWidget {
+  
+    @override
+    Widget build(BuildContext context) {
+-    final Widget pricesIcon = currency.trim().isEmpty
+-        ? const Icon(Icons.currency_rupee)
+-        : CurrencySymbolIcon(code: currency.trim().toUpperCase(), size: 22);
++    // Read prefs INSIDE the drawer so the icon updates when currency changes.
++    final prefs = context.watch<PrefsController>().prefs;
++    final code = (prefs.currency ?? '').trim().toUpperCase();
++    final Widget pricesIcon =
++        code.isEmpty ? const Icon(Icons.currency_rupee) : CurrencySymbolIcon(code: code, size: 22);
+      return Drawer(
+        child: SafeArea(
+          child: ListView(
+            children: <Widget>[
+              const DrawerHeader(child: Text('EATINSIGHT')),
+              ListTile(
+                leading: const Icon(Icons.home),
+                title: const Text('Home'),
+                selected: currentIndex == 0,
+                onTap: () => _handleTap(context, 0),
+              ),
+              ListTile(
+                leading: const Icon(Icons.qr_code),
+                title: const Text('Scan'),
+                selected: currentIndex == 1,
+                onTap: () => _handleTap(context, 1),
+              ),
+              ListTile(
+                leading: const Icon(Icons.search),
+                title: const Text('Search'),
+                selected: currentIndex == 2,
+                onTap: () => _handleTap(context, 2),
+              ),
+-            ListTile(
+-              leading: pricesIcon,
+-              title: const Text('Prices'),
+-              selected: currentIndex == 3,
+-              onTap: () => _handleTap(context, 3),
+-            ),
++            // Dynamic Prices icon based on current currency
++            ListTile(
++              leading: pricesIcon,
++              title: const Text('Prices'),
++              selected: currentIndex == 3,
++              onTap: () => _handleTap(context, 3),
++            ),
+              ListTile(
+                leading: const Icon(Icons.person),
+                title: const Text('Profile'),
+                selected: currentIndex == 4,
+                onTap: () => _handleTap(context, 4),
+              ),

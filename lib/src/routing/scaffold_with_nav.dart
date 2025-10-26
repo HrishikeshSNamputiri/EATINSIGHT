@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
+import 'app_router.dart';
 import '../data/prefs/prefs_repository.dart';
 import '../widgets/currency_symbol_icon.dart';
-import 'app_router.dart';
 
 class ScaffoldWithNavBar extends StatefulWidget {
   final Widget child;
@@ -33,13 +33,14 @@ class _ScaffoldWithNavBarState extends State<ScaffoldWithNavBar> {
   }
 
   void _onTap(int value) {
-    if (value == _index) return;
+    debugPrint('[ScaffoldWithNavBar] onTap -> value=$value (oldIndex=$_index)');
     setState(() => _index = value);
     context.go(_routes[value]);
   }
 
   Widget _buildPricesIcon(String currency, {double size = 24}) {
     final String normalized = currency.trim().toUpperCase();
+    debugPrint('[ScaffoldWithNavBar] _buildPricesIcon normalized="$normalized" size=$size');
     if (normalized.isEmpty) {
       return Icon(Icons.currency_rupee, size: size);
     }
@@ -50,8 +51,12 @@ class _ScaffoldWithNavBarState extends State<ScaffoldWithNavBar> {
   Widget build(BuildContext context) {
     final String location = GoRouterState.of(context).uri.toString();
     _index = _locationToIndex(location);
+    // Read prefs inside the drawer so currency icon stays in sync.
     final prefs = context.watch<PrefsController>().prefs;
     final String currency = prefs.currency ?? '';
+    debugPrint(
+      '[ScaffoldWithNavBar] build -> location=$location, index=$_index, currency="$currency", prefsHash=${prefs.hashCode}',
+    );
 
     return Scaffold(
       body: widget.child,
@@ -86,11 +91,7 @@ class _ScaffoldWithNavBarState extends State<ScaffoldWithNavBar> {
           ),
         ],
       ),
-      drawer: _AppDrawer(
-        currentIndex: _index,
-        onSelect: _onTap,
-        currency: currency,
-      ),
+      drawer: _AppDrawer(currentIndex: _index, onSelect: _onTap),
     );
   }
 }
@@ -98,12 +99,7 @@ class _ScaffoldWithNavBarState extends State<ScaffoldWithNavBar> {
 class _AppDrawer extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onSelect;
-  final String currency;
-  const _AppDrawer({
-    required this.currentIndex,
-    required this.onSelect,
-    required this.currency,
-  });
+  const _AppDrawer({required this.currentIndex, required this.onSelect});
 
   void _handleTap(BuildContext context, int index) {
     Navigator.of(context).pop();
@@ -112,9 +108,13 @@ class _AppDrawer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Widget pricesIcon = currency.trim().isEmpty
-        ? const Icon(Icons.currency_rupee)
-        : CurrencySymbolIcon(code: currency.trim().toUpperCase(), size: 22);
+    final prefs = context.watch<PrefsController>().prefs;
+    final String code = (prefs.currency ?? '').trim().toUpperCase();
+    debugPrint(
+      '[AppDrawer] build -> currentIndex=$currentIndex, selectedCurrency="$code", prefsHash=${prefs.hashCode}',
+    );
+    final Widget pricesIcon =
+        code.isEmpty ? const Icon(Icons.currency_rupee) : CurrencySymbolIcon(code: code, size: 22);
     return Drawer(
       child: SafeArea(
         child: ListView(
@@ -138,6 +138,7 @@ class _AppDrawer extends StatelessWidget {
               selected: currentIndex == 2,
               onTap: () => _handleTap(context, 2),
             ),
+            // Dynamic Prices icon based on current currency
             ListTile(
               leading: pricesIcon,
               title: const Text('Prices'),
