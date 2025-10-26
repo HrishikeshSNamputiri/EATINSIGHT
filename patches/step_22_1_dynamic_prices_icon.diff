@@ -1,0 +1,271 @@
+diff --git a/lib/src/routing/scaffold_with_nav.dart b/lib/src/routing/scaffold_with_nav.dart
+index 1cc0028..0110bd1 100644
+--- a/lib/src/routing/scaffold_with_nav.dart
++++ b/lib/src/routing/scaffold_with_nav.dart
+@@ -1,47 +1,158 @@
+ import 'package:flutter/material.dart';
+ import 'package:go_router/go_router.dart';
++import 'package:provider/provider.dart';
++
++import '../data/prefs/prefs_repository.dart';
++import '../widgets/currency_symbol_icon.dart';
+ import 'app_router.dart';
+ 
+-class ScaffoldWithNavBar extends StatelessWidget {
++class ScaffoldWithNavBar extends StatefulWidget {
+   final Widget child;
+   const ScaffoldWithNavBar({super.key, required this.child});
+ 
+-  static final _destinations = <_Dest>[
+-    _Dest('Home', AppRoutes.home, Icons.home_outlined),
+-    _Dest('Scan', AppRoutes.scan, Icons.qr_code_scanner),
+-    _Dest('Search', AppRoutes.search, Icons.search),
+-    _Dest('Prices', AppRoutes.prices, Icons.currency_rupee),
+-    _Dest('Profile', AppRoutes.profile, Icons.person),
++  @override
++  State<ScaffoldWithNavBar> createState() => _ScaffoldWithNavBarState();
++}
++
++class _ScaffoldWithNavBarState extends State<ScaffoldWithNavBar> {
++  static const List<String> _routes = <String>[
++    AppRoutes.home,
++    AppRoutes.scan,
++    AppRoutes.search,
++    AppRoutes.prices,
++    AppRoutes.profile,
+   ];
+ 
+-  int _indexFromLocation(String loc) {
+-    final i = _destinations.indexWhere((d) => loc == d.route || loc.startsWith('${d.route}/'));
+-    return i < 0 ? 0 : i;
++  int _index = 0;
++
++  int _locationToIndex(String location) {
++    final int match = _routes.indexWhere(
++      (String route) => location == route || location.startsWith('$route/'),
++    );
++    return match >= 0 ? match : 0;
++  }
++
++  void _onTap(int value) {
++    if (value == _index) return;
++    setState(() => _index = value);
++    context.go(_routes[value]);
++  }
++
++  Widget _buildPricesIcon(String currency, {double size = 24}) {
++    final String normalized = currency.trim().toUpperCase();
++    if (normalized.isEmpty) {
++      return Icon(Icons.currency_rupee, size: size);
++    }
++    return CurrencySymbolIcon(code: normalized, size: size);
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+-    final loc = GoRouterState.of(context).uri.toString();
+-    final currentIndex = _indexFromLocation(loc);
++    final String location = GoRouterState.of(context).uri.toString();
++    _index = _locationToIndex(location);
++    final prefs = context.watch<PrefsController>().prefs;
++    final String currency = prefs.currency ?? '';
++
+     return Scaffold(
+-      body: child,
++      body: widget.child,
+       bottomNavigationBar: NavigationBar(
+-        selectedIndex: currentIndex,
+-        onDestinationSelected: (i) {
+-          final dest = _destinations[i];
+-          if (dest.route != loc) context.go(dest.route);
+-        },
+-        destinations: _destinations
+-            .map((d) => NavigationDestination(icon: Icon(d.icon), label: d.label))
+-            .toList(),
++        selectedIndex: _index,
++        onDestinationSelected: _onTap,
++        destinations: <NavigationDestination>[
++          const NavigationDestination(
++            icon: Icon(Icons.home_outlined),
++            selectedIcon: Icon(Icons.home),
++            label: 'Home',
++          ),
++          const NavigationDestination(
++            icon: Icon(Icons.qr_code_scanner),
++            selectedIcon: Icon(Icons.qr_code),
++            label: 'Scan',
++          ),
++          const NavigationDestination(
++            icon: Icon(Icons.search_outlined),
++            selectedIcon: Icon(Icons.search),
++            label: 'Search',
++          ),
++          NavigationDestination(
++            icon: _buildPricesIcon(currency),
++            selectedIcon: _buildPricesIcon(currency, size: 26),
++            label: 'Prices',
++          ),
++          const NavigationDestination(
++            icon: Icon(Icons.person_outline),
++            selectedIcon: Icon(Icons.person),
++            label: 'Profile',
++          ),
++        ],
++      ),
++      drawer: _AppDrawer(
++        currentIndex: _index,
++        onSelect: _onTap,
++        currency: currency,
+       ),
+     );
+   }
+ }
+ 
+-class _Dest {
+-  final String label;
+-  final String route;
+-  final IconData icon;
+-  const _Dest(this.label, this.route, this.icon);
++class _AppDrawer extends StatelessWidget {
++  final int currentIndex;
++  final ValueChanged<int> onSelect;
++  final String currency;
++  const _AppDrawer({
++    required this.currentIndex,
++    required this.onSelect,
++    required this.currency,
++  });
++
++  void _handleTap(BuildContext context, int index) {
++    Navigator.of(context).pop();
++    onSelect(index);
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final Widget pricesIcon = currency.trim().isEmpty
++        ? const Icon(Icons.currency_rupee)
++        : CurrencySymbolIcon(code: currency.trim().toUpperCase(), size: 22);
++    return Drawer(
++      child: SafeArea(
++        child: ListView(
++          children: <Widget>[
++            const DrawerHeader(child: Text('EATINSIGHT')),
++            ListTile(
++              leading: const Icon(Icons.home),
++              title: const Text('Home'),
++              selected: currentIndex == 0,
++              onTap: () => _handleTap(context, 0),
++            ),
++            ListTile(
++              leading: const Icon(Icons.qr_code),
++              title: const Text('Scan'),
++              selected: currentIndex == 1,
++              onTap: () => _handleTap(context, 1),
++            ),
++            ListTile(
++              leading: const Icon(Icons.search),
++              title: const Text('Search'),
++              selected: currentIndex == 2,
++              onTap: () => _handleTap(context, 2),
++            ),
++            ListTile(
++              leading: pricesIcon,
++              title: const Text('Prices'),
++              selected: currentIndex == 3,
++              onTap: () => _handleTap(context, 3),
++            ),
++            ListTile(
++              leading: const Icon(Icons.person),
++              title: const Text('Profile'),
++              selected: currentIndex == 4,
++              onTap: () => _handleTap(context, 4),
++            ),
++          ],
++        ),
++      ),
++    );
++  }
+ }
+diff --git a/lib/src/widgets/currency_symbol_icon.dart b/lib/src/widgets/currency_symbol_icon.dart
+new file mode 100644
+index 0000000..6acb966
+--- /dev/null
++++ b/lib/src/widgets/currency_symbol_icon.dart
+@@ -0,0 +1,76 @@
++import 'package:flutter/material.dart';
++import 'package:intl/intl.dart';
++
++/// Renders an icon that reflects the selected currency.
++/// Falls back to a textual currency symbol when a dedicated Material icon
++/// is not available for the given ISO code.
++class CurrencySymbolIcon extends StatelessWidget {
++  final String? code;
++  final double size;
++  const CurrencySymbolIcon({super.key, this.code, this.size = 24});
++
++  IconData? _iconFor(String normalizedCode) {
++    switch (normalizedCode) {
++      case 'INR':
++        return Icons.currency_rupee;
++      case 'USD':
++      case 'AUD':
++      case 'CAD':
++      case 'NZD':
++      case 'SGD':
++      case 'MXN':
++      case 'ARS':
++      case 'CLP':
++      case 'COP':
++        return Icons.attach_money; // $
++      case 'EUR':
++        return Icons.euro;
++      case 'GBP':
++        return Icons.currency_pound;
++      case 'JPY':
++        return Icons.currency_yen;
++      case 'CNY':
++      case 'CNH':
++        return Icons.currency_yuan;
++      case 'RUB':
++        return Icons.currency_ruble;
++      case 'TRY':
++        return Icons.currency_lira;
++      case 'CHF':
++        return Icons.currency_franc;
++      case 'BTC':
++        return Icons.currency_bitcoin;
++      default:
++        return null;
++    }
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final String normalized = (code ?? '').trim().toUpperCase();
++    final IconData? icon = _iconFor(normalized);
++    if (icon != null) {
++      return Icon(icon, size: size);
++    }
++
++    String symbol;
++    try {
++      symbol = NumberFormat.simpleCurrency(
++        name: normalized.isEmpty ? 'INR' : normalized,
++      ).currencySymbol;
++    } catch (_) {
++      symbol = '¤'; // Generic currency sign
++    }
++
++    final Color? color = IconTheme.of(context).color;
++    return Text(
++      symbol,
++      style: TextStyle(
++        fontSize: size * 0.9,
++        fontWeight: FontWeight.w600,
++        color: color,
++        height: 1.0,
++      ),
++    );
++  }
++}
