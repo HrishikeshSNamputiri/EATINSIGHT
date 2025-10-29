@@ -16,30 +16,44 @@ class HomeScreen extends StatelessWidget {
       appBar: AppBar(title: const Text('EATINSIGHT')),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: GridView.count(
-          crossAxisCount: 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          children: cards.map((c) {
-            return Card(
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: () async {
-                  if (context.mounted) context.go(c.route);
-                },
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(c.icon, size: 40),
-                      const SizedBox(height: 8),
-                      Text(c.label, textAlign: TextAlign.center),
-                    ],
-                  ),
-                ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                icon: const Icon(Icons.add_box),
+                label: const Text('Add product'),
+                onPressed: () => context.go(AppRoutes.add),
               ),
-            );
-          }).toList(),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: GridView.count(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                children: cards.map((c) {
+                  return Card(
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: () => context.go(c.route),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(c.icon, size: 40),
+                            const SizedBox(height: 8),
+                            Text(c.label, textAlign: TextAlign.center),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
         ),
       ),
     );

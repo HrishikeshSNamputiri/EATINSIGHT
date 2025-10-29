@@ -31,6 +31,8 @@ class OffWriteApi {
     String? name,
     String? brand,
     String? quantity,
+    String? categories,
+    String? ingredientsText,
   }) async {
     final data = <String, dynamic>{
       'code': barcode,
@@ -41,6 +43,9 @@ class OffWriteApi {
       if (name != null && name.trim().isNotEmpty) 'product_name': name.trim(),
       if (brand != null && brand.trim().isNotEmpty) 'brands': brand.trim(),
       if (quantity != null && quantity.trim().isNotEmpty) 'quantity': quantity.trim(),
+      if (categories != null && categories.trim().isNotEmpty) 'categories': categories.trim(),
+      if (ingredientsText != null && ingredientsText.trim().isNotEmpty)
+        'ingredients_text': ingredientsText.trim(),
     };
     try {
       final res = await _dio.post('/cgi/product_jqm2.pl', data: data);

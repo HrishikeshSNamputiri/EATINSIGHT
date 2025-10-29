@@ -378,34 +378,56 @@ class _NotFound extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final addUri = Uri(path: AppRoutes.add, queryParameters: {'barcode': barcode}).toString();
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.inventory_2_outlined, size: 56),
-            const SizedBox(height: 12),
-            Text('No product found for $barcode', textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                FilledButton.icon(
-                  onPressed: () => context.go(AppRoutes.scan),
-                  icon: const Icon(Icons.qr_code_scanner),
-                  label: const Text('Scan another'),
+                const Icon(Icons.inventory_2_outlined, size: 56),
+                const SizedBox(height: 12),
+                const Text(
+                  'Product not found',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
                 ),
-                OutlinedButton.icon(
-                  onPressed: () =>
-                      Clipboard.setData(ClipboardData(text: barcode)),
-                  icon: const Icon(Icons.copy),
-                  label: const Text('Copy code'),
+                const SizedBox(height: 8),
+                const Text(
+                  'You can add it to the database.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: () => context.go(addUri),
+                  icon: const Icon(Icons.add_box),
+                  label: const Text('Add this product'),
+                ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => context.go(AppRoutes.scan),
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: const Text('Scan another'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          Clipboard.setData(ClipboardData(text: barcode)),
+                      icon: const Icon(Icons.copy),
+                      label: const Text('Copy code'),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );

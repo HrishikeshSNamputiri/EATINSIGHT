@@ -4,6 +4,7 @@ import '../features/scan/presentation/scan_screen.dart';
 import '../features/search/presentation/search_screen.dart';
 import '../features/profile/presentation/profile_screen.dart';
 import '../features/profile/presentation/preferences_screen.dart';
+import '../features/add/presentation/add_product_screen.dart';
 import '../features/product/presentation/product_screen.dart';
 import 'scaffold_with_nav.dart';
 
@@ -11,6 +12,7 @@ class AppRoutes {
   static const home = '/';
   static const prefs = '/prefs';
   static const scan = '/scan';
+  static const add = '/add';
   static const search = '/search';
   static const profile = '/profile';
   static const product = '/product/:barcode';
@@ -25,6 +27,13 @@ GoRouter createRouter() {
         routes: <RouteBase>[
           GoRoute(path: AppRoutes.home, builder: (_, __) => const HomeScreen()),
           GoRoute(path: AppRoutes.scan, builder: (_, __) => const ScanScreen()),
+          GoRoute(
+            path: AppRoutes.add,
+            builder: (_, state) {
+              final barcode = state.uri.queryParameters['barcode'];
+              return AddProductScreen(prefilledBarcode: barcode);
+            },
+          ),
           GoRoute(path: AppRoutes.search, builder: (_, __) => const SearchScreen()),
           GoRoute(path: AppRoutes.prefs, builder: (_, __) => const PreferencesScreen()),
           GoRoute(path: AppRoutes.profile, builder: (_, __) => const ProfileScreen()),

@@ -14,6 +14,7 @@ class _ScaffoldWithNavBarState extends State<ScaffoldWithNavBar> {
   static const List<String> _routes = <String>[
     AppRoutes.home,
     AppRoutes.scan,
+    AppRoutes.add,
     AppRoutes.search,
     AppRoutes.profile,
   ];
@@ -35,7 +36,7 @@ class _ScaffoldWithNavBarState extends State<ScaffoldWithNavBar> {
 
   @override
   Widget build(BuildContext context) {
-    final String location = GoRouterState.of(context).uri.toString();
+    final String location = GoRouterState.of(context).uri.path;
     _index = _locationToIndex(location);
     debugPrint('[ScaffoldWithNavBar] build -> location=$location, index=$_index');
 
@@ -54,6 +55,11 @@ class _ScaffoldWithNavBarState extends State<ScaffoldWithNavBar> {
             icon: Icon(Icons.qr_code_scanner),
             selectedIcon: Icon(Icons.qr_code),
             label: 'Scan',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.add_box_outlined),
+            selectedIcon: Icon(Icons.add_box),
+            label: 'Add',
           ),
           const NavigationDestination(
             icon: Icon(Icons.search_outlined),
@@ -103,16 +109,22 @@ class _AppDrawer extends StatelessWidget {
               onTap: () => _handleTap(context, 1),
             ),
             ListTile(
-              leading: const Icon(Icons.search),
-              title: const Text('Search'),
+              leading: const Icon(Icons.add_box),
+              title: const Text('Add'),
               selected: currentIndex == 2,
               onTap: () => _handleTap(context, 2),
             ),
             ListTile(
-              leading: const Icon(Icons.person),
-              title: const Text('Profile'),
+              leading: const Icon(Icons.search),
+              title: const Text('Search'),
               selected: currentIndex == 3,
               onTap: () => _handleTap(context, 3),
+            ),
+            ListTile(
+              leading: const Icon(Icons.person),
+              title: const Text('Profile'),
+              selected: currentIndex == 4,
+              onTap: () => _handleTap(context, 4),
             ),
           ],
         ),

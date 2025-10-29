@@ -1,0 +1,645 @@
+*** Begin Patch
+*** Update File: lib/src/data/off/off_write_api.dart
+@@
+   Future<OffWriteResult> createOrUpdate({
+     required String user,
+     required String pass,
+     required String barcode,
+     String? name,
+     String? brand,
+     String? quantity,
++    String? categories,
++    String? ingredientsText,
+   }) async {
+     final data = <String, dynamic>{
+       'code': barcode,
+       'user_id': user,
+       'password': pass,
+       'json': '1',
+       'comment': 'Edited via EATINSIGHT',
+       if (name != null && name.trim().isNotEmpty) 'product_name': name.trim(),
+       if (brand != null && brand.trim().isNotEmpty) 'brands': brand.trim(),
+       if (quantity != null && quantity.trim().isNotEmpty) 'quantity': quantity.trim(),
++      if (categories != null && categories.trim().isNotEmpty) 'categories': categories.trim(),
++      if (ingredientsText != null && ingredientsText.trim().isNotEmpty)
++        'ingredients_text': ingredientsText.trim(),
+     };
+*** End Patch
+*** Begin Patch
+*** Add File: lib/src/features/add/presentation/widgets/add_photo_slot.dart
++import 'dart:io';
++
++import 'package:flutter/material.dart';
++import 'package:image_picker/image_picker.dart';
++import 'package:openfoodfacts/openfoodfacts.dart';
++
++/// Selects a photo for the given [imageField] using camera or gallery, then
++/// forwards the resulting [File] to [onPicked].
++class AddPhotoSlot extends StatelessWidget {
++  const AddPhotoSlot({
++    super.key,
++    required this.label,
++    required this.imageField,
++    required this.onPicked,
++    this.thumbnailPath,
++  });
++
++  final String label;
++  final ImageField imageField;
++  final Future<void> Function(File file) onPicked;
++  final String? thumbnailPath;
++
++  Future<void> _chooseSource(BuildContext context) async {
++    final choice = await showModalBottomSheet<ImageSource>(
++      context: context,
++      builder: (ctx) => SafeArea(
++        child: Column(
++          mainAxisSize: MainAxisSize.min,
++          children: [
++            ListTile(
++              leading: const Icon(Icons.photo_camera),
++              title: const Text('Take photo'),
++              onTap: () => Navigator.of(ctx).pop(ImageSource.camera),
++            ),
++            ListTile(
++              leading: const Icon(Icons.photo_library),
++              title: const Text('Choose from files'),
++              onTap: () => Navigator.of(ctx).pop(ImageSource.gallery),
++            ),
++          ],
++        ),
++      ),
++    );
++    if (choice == null) return;
++    final picker = ImagePicker();
++    final XFile? xfile = await picker.pickImage(
++      source: choice,
++      imageQuality: 92,
++      preferredCameraDevice: CameraDevice.rear,
++    );
++    if (xfile == null) return;
++    await onPicked(File(xfile.path));
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    return Tooltip(
++      message: '${imageField.name.toLowerCase()} photo',
++      child: GestureDetector(
++        onTap: () => _chooseSource(context),
++        child: Container(
++          width: 140,
++          height: 120,
++          decoration: BoxDecoration(
++            borderRadius: BorderRadius.circular(12),
++            color: Theme.of(context).colorScheme.surfaceContainerHighest,
++            border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
++          ),
++          child: thumbnailPath == null
++              ? Column(
++                  mainAxisAlignment: MainAxisAlignment.center,
++                  children: [
++                    const Icon(Icons.add_a_photo_outlined),
++                    const SizedBox(height: 8),
++                    Text(label, textAlign: TextAlign.center),
++                  ],
++                )
++              : ClipRRect(
++                  borderRadius: BorderRadius.circular(12),
++                  child: Image.file(
++                    File(thumbnailPath!),
++                    fit: BoxFit.cover,
++                    width: double.infinity,
++                    height: double.infinity,
++                  ),
++                ),
++        ),
++      ),
++    );
++  }
++}
+*** End Patch
+*** Begin Patch
+*** Add File: lib/src/features/add/presentation/add_product_screen.dart
++import 'dart:io';
++
++import 'package:flutter/material.dart';
++import 'package:go_router/go_router.dart';
++import 'package:openfoodfacts/openfoodfacts.dart';
++import 'package:provider/provider.dart';
++
++import '../../../data/off/off_auth.dart';
++import '../../../data/off/off_write_api.dart';
++import 'widgets/add_photo_slot.dart';
++
++class AddProductScreen extends StatefulWidget {
++  const AddProductScreen({super.key, this.prefilledBarcode});
++
++  final String? prefilledBarcode;
++
++  @override
++  State<AddProductScreen> createState() => _AddProductScreenState();
++}
++
++class _AddProductScreenState extends State<AddProductScreen> {
++  final _formKey = GlobalKey<FormState>();
++  final _barcodeCtrl = TextEditingController();
++  final _nameCtrl = TextEditingController();
++  final _brandCtrl = TextEditingController();
++  final _quantityCtrl = TextEditingController();
++  final _categoriesCtrl = TextEditingController();
++  final _ingredientsCtrl = TextEditingController();
++
++  final Map<ImageField, String?> _thumbnails = {
++    ImageField.FRONT: null,
++    ImageField.INGREDIENTS: null,
++    ImageField.NUTRITION: null,
++    ImageField.PACKAGING: null,
++  };
++
++  bool _saving = false;
++  String? _error;
++
++  @override
++  void initState() {
++    super.initState();
++    if (widget.prefilledBarcode != null && widget.prefilledBarcode!.isNotEmpty) {
++      _barcodeCtrl.text = widget.prefilledBarcode!;
++    }
++  }
++
++  @override
++  void dispose() {
++    _barcodeCtrl.dispose();
++    _nameCtrl.dispose();
++    _brandCtrl.dispose();
++    _quantityCtrl.dispose();
++    _categoriesCtrl.dispose();
++    _ingredientsCtrl.dispose();
++    super.dispose();
++  }
++
++  Future<void> _handleSubmit() async {
++    if (!_formKey.currentState!.validate()) return;
++    final auth = context.read<OffAuth>();
++    final offUser = auth.offUser;
++    if (offUser == null) {
++      setState(() => _error = 'Please sign in under Profile first.');
++      return;
++    }
++
++    final barcode = _barcodeCtrl.text.trim();
++    setState(() {
++      _saving = true;
++      _error = null;
++    });
++
++    try {
++      final result = await OffWriteApi().createOrUpdate(
++        user: offUser.userId,
++        pass: offUser.password,
++        barcode: barcode,
++        name: _nameCtrl.text,
++        brand: _brandCtrl.text,
++        quantity: _quantityCtrl.text,
++        categories: _categoriesCtrl.text,
++        ingredientsText: _ingredientsCtrl.text,
++      );
++      if (!mounted) return;
++      if (result.ok) {
++        ScaffoldMessenger.of(context).showSnackBar(
++          const SnackBar(content: Text('Product saved')),
++        );
++        final encodedBarcode = Uri.encodeComponent(barcode);
++        context.go('/product/$encodedBarcode');
++      } else {
++        setState(() => _error = result.message);
++      }
++    } catch (err) {
++      if (mounted) setState(() => _error = err.toString());
++    } finally {
++      if (mounted) setState(() => _saving = false);
++    }
++  }
++
++  Future<void> _uploadImage(ImageField field, File file) async {
++    final barcode = _barcodeCtrl.text.trim();
++    if (barcode.isEmpty) {
++      ScaffoldMessenger.of(context).showSnackBar(
++        const SnackBar(content: Text('Enter a barcode first')),
++      );
++      return;
++    }
++
++    final auth = context.read<OffAuth>();
++    final user = auth.offUser ?? const User(userId: 'anonymous', password: '');
++    final sendImage = SendImage(
++      barcode: barcode,
++      imageField: field,
++      imageUri: Uri.file(file.path),
++    );
++    final result = await OpenFoodAPIClient.addProductImage(user, sendImage);
++    if (!mounted) return;
++    if (result.status == 'status ok') {
++      setState(() => _thumbnails[field] = file.path);
++      ScaffoldMessenger.of(context).showSnackBar(
++        SnackBar(content: Text('${field.prettyName} photo uploaded')),
++      );
++    } else {
++      ScaffoldMessenger.of(context).showSnackBar(
++        SnackBar(content: Text(result.error ?? 'Upload failed')),
++      );
++    }
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    final readOnlyBarcode =
++        widget.prefilledBarcode != null && widget.prefilledBarcode!.isNotEmpty;
++    return Scaffold(
++      appBar: AppBar(title: const Text('Add product')),
++      body: SingleChildScrollView(
++        padding: const EdgeInsets.all(16),
++        child: Form(
++          key: _formKey,
++          child: Column(
++            crossAxisAlignment: CrossAxisAlignment.start,
++            children: [
++              TextFormField(
++                controller: _barcodeCtrl,
++                readOnly: readOnlyBarcode,
++                decoration: const InputDecoration(labelText: 'Barcode'),
++                validator: (value) =>
++                    (value == null || value.trim().isEmpty) ? 'Barcode required' : null,
++              ),
++              const SizedBox(height: 12),
++              TextFormField(
++                controller: _nameCtrl,
++                decoration: const InputDecoration(labelText: 'Name'),
++              ),
++              const SizedBox(height: 12),
++              TextFormField(
++                controller: _brandCtrl,
++                decoration: const InputDecoration(labelText: 'Brand'),
++              ),
++              const SizedBox(height: 12),
++              TextFormField(
++                controller: _quantityCtrl,
++                decoration:
++                    const InputDecoration(labelText: 'Quantity (e.g., 330 ml)'),
++              ),
++              const SizedBox(height: 12),
++              TextFormField(
++                controller: _categoriesCtrl,
++                decoration: const InputDecoration(
++                  labelText: 'Categories (comma-separated)',
++                ),
++              ),
++              const SizedBox(height: 12),
++              TextFormField(
++                controller: _ingredientsCtrl,
++                maxLines: 3,
++                decoration: const InputDecoration(labelText: 'Ingredients text'),
++              ),
++              const SizedBox(height: 20),
++              Text('Photos', style: Theme.of(context).textTheme.titleMedium),
++              const SizedBox(height: 8),
++              Wrap(
++                spacing: 12,
++                runSpacing: 12,
++                children: [
++                  AddPhotoSlot(
++                    label: 'Front',
++                    imageField: ImageField.FRONT,
++                    thumbnailPath: _thumbnails[ImageField.FRONT],
++                    onPicked: (file) => _uploadImage(ImageField.FRONT, file),
++                  ),
++                  AddPhotoSlot(
++                    label: 'Ingredients',
++                    imageField: ImageField.INGREDIENTS,
++                    thumbnailPath: _thumbnails[ImageField.INGREDIENTS],
++                    onPicked: (file) => _uploadImage(ImageField.INGREDIENTS, file),
++                  ),
++                  AddPhotoSlot(
++                    label: 'Nutrition',
++                    imageField: ImageField.NUTRITION,
++                    thumbnailPath: _thumbnails[ImageField.NUTRITION],
++                    onPicked: (file) => _uploadImage(ImageField.NUTRITION, file),
++                  ),
++                  AddPhotoSlot(
++                    label: 'Packaging',
++                    imageField: ImageField.PACKAGING,
++                    thumbnailPath: _thumbnails[ImageField.PACKAGING],
++                    onPicked: (file) => _uploadImage(ImageField.PACKAGING, file),
++                  ),
++                ],
++              ),
++              if (_error != null) ...[
++                const SizedBox(height: 12),
++                Text(
++                  _error!,
++                  style: TextStyle(color: Theme.of(context).colorScheme.error),
++                ),
++              ],
++              const SizedBox(height: 16),
++              FilledButton(
++                onPressed: _saving ? null : _handleSubmit,
++                child: Text(_saving ? 'Submitting…' : 'Submit'),
++              ),
++            ],
++          ),
++        ),
++      ),
++    );
++  }
++}
++
++extension on ImageField {
++  String get prettyName {
++    switch (this) {
++      case ImageField.FRONT:
++        return 'Front';
++      case ImageField.INGREDIENTS:
++        return 'Ingredients';
++      case ImageField.NUTRITION:
++        return 'Nutrition';
++      case ImageField.PACKAGING:
++        return 'Packaging';
++      default:
++        return name;
++    }
++  }
++}
+*** End Patch
+*** Begin Patch
+*** Update File: lib/src/routing/app_router.dart
+@@
+-import '../features/profile/presentation/profile_screen.dart';
+-import '../features/profile/presentation/preferences_screen.dart';
++import '../features/profile/presentation/profile_screen.dart';
++import '../features/profile/presentation/preferences_screen.dart';
++import '../features/add/presentation/add_product_screen.dart';
+@@
+   static const prefs = '/prefs';
+   static const scan = '/scan';
++  static const add = '/add';
+   static const search = '/search';
+   static const profile = '/profile';
+   static const product = '/product/:barcode';
+@@
+-          GoRoute(path: AppRoutes.scan, builder: (_, __) => const ScanScreen()),
++          GoRoute(path: AppRoutes.scan, builder: (_, __) => const ScanScreen()),
++          GoRoute(
++            path: AppRoutes.add,
++            builder: (_, state) {
++              final barcode = state.uri.queryParameters['barcode'];
++              return AddProductScreen(prefilledBarcode: barcode);
++            },
++          ),
+*** End Patch
+*** Begin Patch
+*** Update File: lib/src/routing/scaffold_with_nav.dart
+@@
+-  static const List<String> _routes = <String>[
+-    AppRoutes.home,
+-    AppRoutes.scan,
+-    AppRoutes.search,
+-    AppRoutes.profile,
+-  ];
++  static const List<String> _routes = <String>[
++    AppRoutes.home,
++    AppRoutes.scan,
++    AppRoutes.add,
++    AppRoutes.search,
++    AppRoutes.profile,
++  ];
+@@
+-    final String location = GoRouterState.of(context).uri.toString();
++    final String location = GoRouterState.of(context).uri.path;
+@@
+-          const NavigationDestination(
+-            icon: Icon(Icons.search_outlined),
+-            selectedIcon: Icon(Icons.search),
+-            label: 'Search',
+-          ),
++          const NavigationDestination(
++            icon: Icon(Icons.add_box_outlined),
++            selectedIcon: Icon(Icons.add_box),
++            label: 'Add',
++          ),
++          const NavigationDestination(
++            icon: Icon(Icons.search_outlined),
++            selectedIcon: Icon(Icons.search),
++            label: 'Search',
++          ),
+@@
+-            ListTile(
+-              leading: const Icon(Icons.search),
+-              title: const Text('Search'),
+-              selected: currentIndex == 2,
+-              onTap: () => _handleTap(context, 2),
+-            ),
++            ListTile(
++              leading: const Icon(Icons.add_box),
++              title: const Text('Add'),
++              selected: currentIndex == 2,
++              onTap: () => _handleTap(context, 2),
++            ),
++            ListTile(
++              leading: const Icon(Icons.search),
++              title: const Text('Search'),
++              selected: currentIndex == 3,
++              onTap: () => _handleTap(context, 3),
++            ),
+             ListTile(
+               leading: const Icon(Icons.person),
+               title: const Text('Profile'),
+-              selected: currentIndex == 3,
+-              onTap: () => _handleTap(context, 3),
++              selected: currentIndex == 4,
++              onTap: () => _handleTap(context, 4),
+             ),
+*** End Patch
+*** Begin Patch
+*** Update File: lib/src/features/home/presentation/home_screen.dart
+@@
+-    return Scaffold(
+-      appBar: AppBar(title: const Text('EATINSIGHT')),
+-      body: Padding(
+-        padding: const EdgeInsets.all(16),
+-        child: GridView.count(
+-          crossAxisCount: 2,
+-          crossAxisSpacing: 12,
+-          mainAxisSpacing: 12,
+-          children: cards.map((c) {
+-            return Card(
+-              clipBehavior: Clip.antiAlias,
+-              child: InkWell(
+-                onTap: () async {
+-                  if (context.mounted) context.go(c.route);
+-                },
+-                child: Center(
+-                  child: Column(
+-                    mainAxisSize: MainAxisSize.min,
+-                    children: [
+-                      Icon(c.icon, size: 40),
+-                      const SizedBox(height: 8),
+-                      Text(c.label, textAlign: TextAlign.center),
+-                    ],
+-                  ),
+-                ),
+-              ),
+-            );
+-          }).toList(),
+-        ),
+-      ),
+-    );
++    return Scaffold(
++      appBar: AppBar(title: const Text('EATINSIGHT')),
++      body: Padding(
++        padding: const EdgeInsets.all(16),
++        child: Column(
++          crossAxisAlignment: CrossAxisAlignment.start,
++          children: [
++            SizedBox(
++              width: double.infinity,
++              child: FilledButton.icon(
++                icon: const Icon(Icons.add_box),
++                label: const Text('Add product'),
++                onPressed: () => context.go(AppRoutes.add),
++              ),
++            ),
++            const SizedBox(height: 16),
++            Expanded(
++              child: GridView.count(
++                crossAxisCount: 2,
++                crossAxisSpacing: 12,
++                mainAxisSpacing: 12,
++                children: cards.map((c) {
++                  return Card(
++                    clipBehavior: Clip.antiAlias,
++                    child: InkWell(
++                      onTap: () => context.go(c.route),
++                      child: Center(
++                        child: Column(
++                          mainAxisSize: MainAxisSize.min,
++                          children: [
++                            Icon(c.icon, size: 40),
++                            const SizedBox(height: 8),
++                            Text(c.label, textAlign: TextAlign.center),
++                          ],
++                        ),
++                      ),
++                    ),
++                  );
++                }).toList(),
++              ),
++            ),
++          ],
++        ),
++      ),
++    );
+   }
+ }
+*** End Patch
+*** Begin Patch
+*** Update File: lib/src/features/product/presentation/product_screen.dart
+@@
+-          final product = snap.data;
+-          if (product == null) return _NotFound(barcode: widget.barcode);
++          final product = snap.data;
++          if (product == null) return _NotFound(barcode: widget.barcode);
+@@
+ class _NotFound extends StatelessWidget {
+   final String barcode;
+   const _NotFound({required this.barcode});
+ 
+   @override
+   Widget build(BuildContext context) {
+-    return Center(
+-      child: Padding(
+-        padding: const EdgeInsets.all(24),
+-        child: Column(
+-          mainAxisSize: MainAxisSize.min,
+-          children: [
+-            const Icon(Icons.inventory_2_outlined, size: 56),
+-            const SizedBox(height: 12),
+-            Text('No product found for $barcode', textAlign: TextAlign.center),
+-            const SizedBox(height: 16),
+-            Wrap(
+-              spacing: 12,
+-              runSpacing: 8,
+-              children: [
+-                FilledButton.icon(
+-                  onPressed: () => context.go(AppRoutes.scan),
+-                  icon: const Icon(Icons.qr_code_scanner),
+-                  label: const Text('Scan another'),
+-                ),
+-                OutlinedButton.icon(
+-                  onPressed: () =>
+-                      Clipboard.setData(ClipboardData(text: barcode)),
+-                  icon: const Icon(Icons.copy),
+-                  label: const Text('Copy code'),
+-                ),
+-              ],
+-            ),
+-          ],
+-        ),
+-      ),
+-    );
++    final addUri = Uri(path: AppRoutes.add, queryParameters: {'barcode': barcode}).toString();
++    return Center(
++      child: Padding(
++        padding: const EdgeInsets.all(24),
++        child: Card(
++          child: Padding(
++            padding: const EdgeInsets.all(20),
++            child: Column(
++              mainAxisSize: MainAxisSize.min,
++              children: [
++                const Icon(Icons.inventory_2_outlined, size: 56),
++                const SizedBox(height: 12),
++                const Text(
++                  'Product not found',
++                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
++                  textAlign: TextAlign.center,
++                ),
++                const SizedBox(height: 8),
++                const Text(
++                  'You can add it to the database.',
++                  textAlign: TextAlign.center,
++                ),
++                const SizedBox(height: 16),
++                FilledButton.icon(
++                  onPressed: () => context.go(addUri),
++                  icon: const Icon(Icons.add_box),
++                  label: const Text('Add this product'),
++                ),
++                const SizedBox(height: 12),
++                Wrap(
++                  spacing: 12,
++                  runSpacing: 8,
++                  alignment: WrapAlignment.center,
++                  children: [
++                    OutlinedButton.icon(
++                      onPressed: () => context.go(AppRoutes.scan),
++                      icon: const Icon(Icons.qr_code_scanner),
++                      label: const Text('Scan another'),
++                    ),
++                    OutlinedButton.icon(
++                      onPressed: () =>
++                          Clipboard.setData(ClipboardData(text: barcode)),
++                      icon: const Icon(Icons.copy),
++                      label: const Text('Copy code'),
++                    ),
++                  ],
++                ),
++              ],
++            ),
++          ),
++        ),
++      ),
++    );
+   }
+ }
+*** End Patch
